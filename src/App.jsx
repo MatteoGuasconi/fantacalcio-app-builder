@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PlusCircle, RotateCcw, X, Settings, Upload, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.entry';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/legacy/build/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const ROLES_CONFIG = [
   { key: 'P', name: 'Portieri', count: 3, bg: 'bg-amber-950/20', border: 'border-amber-500/30', badge: 'bg-amber-500 text-slate-950' },
@@ -56,7 +57,7 @@ export default function App() {
   });
 
   const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db_v4');
+    const saved = localStorage.getItem('fanta_custom_players_db_v5');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -87,7 +88,7 @@ export default function App() {
     localStorage.setItem('fanta_custom_teams_count_final', teamCount.toString());
     localStorage.setItem('fanta_custom_team_names_final', JSON.stringify(teamNames));
     localStorage.setItem('fanta_custom_teams_data_final', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db_v4', JSON.stringify(customPlayersDb));
+    localStorage.setItem('fanta_custom_players_db_v5', JSON.stringify(customPlayersDb));
   }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
 
   useEffect(() => {
@@ -219,25 +220,26 @@ export default function App() {
     }
   };
 
-  const cleanPlayerName = (name) => {
-    return name.replace(/[^\w\sÀ-ÿ.'-]/gi, '').replace(/\s+/g, ' ').trim();
-  };
-
   const parseAndAddPlayers = (rawPlayers) => {
     const validRoles = ['P', 'D', 'C', 'A'];
     const cleanList = rawPlayers
       .map(p => {
-        const role = (p.role || '').toUpperCase().charAt(0);
-        const name = cleanPlayerName(p.name || '');
-        const team = cleanPlayerName(p.team || '');
+        let role = (p.role || '').toUpperCase().trim();
+        if (role.startsWith('P')) role = 'P';
+        else if (role.startsWith('D')) role = 'D';
+        else if (role.startsWith('C')) role = 'C';
+        else if (role.startsWith('A')) role = 'A';
+
+        let name = (p.name || '').replace(/^[#\d\s|]+/, '').trim();
+        let team = (p.team || '').trim();
+
         return { name, role, team };
       })
-      .filter(p => validRoles.includes(p.role) && p.name.length >= 2);
+      .filter(p => validRoles.includes(p.role) && p.name.length >= 2 && !['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot'].includes(p.name));
 
-    // Rimuovi duplicati
     const uniqueMap = new Map();
     cleanList.forEach(p => {
-      const key = `${p.name}_${p.role}_${p.team}`;
+      const key = `${p.name}_${p.role}`;
       if (!uniqueMap.has(key)) uniqueMap.set(key, p);
     });
 
@@ -245,7 +247,7 @@ export default function App() {
 
     if (finalPlayers.length > 0) {
       setCustomPlayersDb(finalPlayers);
-      setUploadStatus(`✅ Caricati con successo ${finalPlayers.length} calciatori nel listone!`);
+      setUploadStatus(`✅ Caricati con successo ${finalPlayers.length} calciatori!`);
     } else {
       setUploadStatus('❌ Nessun dato valido estratto dal file.');
     }
@@ -311,40 +313,53 @@ export default function App() {
       reader.onload = async () => {
         try {
           const typedarray = new Uint8Array(reader.result);
-          const loadingTask = pdfjsLib.getDocument({
-            data: typedarray,
-            nativeImageDecoderSupport: 'none',
-            disableFontFace: true
-          });
-          const pdf = await loadingTask.promise;
+          const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
           const parsed = [];
 
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const items = textContent.items.map(it => it.str.trim()).filter(Boolean);
+            
+            // Raggruppa gli elementi per riga (coordinata Y)
+            const rowsMap = {};
+            textContent.items.forEach(item => {
+              const y = Math.round(item.transform[5]);
+              if (!rowsMap[y]) rowsMap[y] = [];
+              rowsMap[y].push({ x: item.transform[4], str: item.str.trim() });
+            });
 
-            for (let j = 0; j < items.length; j++) {
-              const item = items[j];
-              const roleMatch = item.match(/^([PDCA])(\(.*\))?$/i);
-              if (roleMatch) {
-                const role = roleMatch[1].toUpperCase();
-                const name = items[j + 1];
-                const team = items[j + 2];
+            // Ordina le righe dall'alto verso il basso
+            const sortedYs = Object.keys(rowsMap).map(Number).sort((a, b) => b - a);
 
-                if (name && team && isNaN(name) && isNaN(team) && !name.startsWith('#') && !team.startsWith('#')) {
-                  parsed.push({ role, name, team });
+            sortedYs.forEach(y => {
+              // Ordina da sinistra a destra
+              const rowItems = rowsMap[y].sort((a, b) => a.x - b.x).map(it => it.str).filter(Boolean);
+              
+              // Trova il ruolo nella riga
+              const roleIdx = rowItems.findIndex(str => str.match(/^([PDCA])(\(.*\))?$/i));
+              if (roleIdx !== -1) {
+                const role = rowItems[roleIdx].charAt(0).toUpperCase();
+                const name = rowItems[roleIdx + 1];
+                const team = rowItems[roleIdx + 2];
+
+                if (name && isNaN(name) && !name.startsWith('#')) {
+                  parsed.push({
+                    role,
+                    name,
+                    team: team && isNaN(team) && !team.startsWith('#') ? team : ''
+                  });
                 }
               }
-            }
+            });
           }
 
           if (parsed.length > 0) {
             parseAndAddPlayers(parsed);
           } else {
-            setUploadStatus('❌ Impossibile leggere il layout di questo PDF.');
+            setUploadStatus('❌ Impossibile estrarre i dati da questo PDF.');
           }
         } catch (err) {
+          console.error(err);
           setUploadStatus('❌ Errore durante la decodifica del PDF.');
         }
       };
