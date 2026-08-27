@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Upload, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/legacy/build/pdf.worker.min.js`;
 
 const ROLES_CONFIG = [
   { key: 'P', name: 'Portieri', count: 3, bg: 'bg-amber-950/20', border: 'border-amber-500/30', badge: 'bg-amber-500 text-slate-950' },
@@ -53,7 +56,7 @@ export default function App() {
   });
 
   const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db_live');
+    const saved = localStorage.getItem('fanta_custom_players_db_v4');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -84,7 +87,7 @@ export default function App() {
     localStorage.setItem('fanta_custom_teams_count_final', teamCount.toString());
     localStorage.setItem('fanta_custom_team_names_final', JSON.stringify(teamNames));
     localStorage.setItem('fanta_custom_teams_data_final', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db_live', JSON.stringify(customPlayersDb));
+    localStorage.setItem('fanta_custom_players_db_v4', JSON.stringify(customPlayersDb));
   }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
 
   useEffect(() => {
@@ -112,9 +115,10 @@ export default function App() {
   const handleNameSearchChange = (value) => {
     setQuickName(value);
     if (value.trim().length >= 1 && customPlayersDb.length > 0) {
+      const q = value.toLowerCase();
       const filtered = customPlayersDb.filter(p =>
-        p.name.toLowerCase().includes(value.toLowerCase()) ||
-        (p.team && p.team.toLowerCase().includes(value.toLowerCase()))
+        p.name.toLowerCase().includes(q) ||
+        (p.team && p.team.toLowerCase().includes(q))
       ).slice(0, 10);
       setSuggestions(filtered);
       setShowSuggestions(true);
@@ -215,73 +219,36 @@ export default function App() {
     }
   };
 
-  const parseAndAddPlayers = (rawPlayers) => {
-    const cleanList = rawPlayers
-      .filter(p => p.name && p.role)
-      .map(p => {
-        let r = p.role.trim().toUpperCase().charAt(0);
-        if (!['P', 'D', 'C', 'A'].includes(r)) r = 'C';
-        return {
-          name: p.name.trim(),
-          role: r,
-          team: (p.team || '').trim()
-        };
-      });
+  const cleanPlayerName = (name) => {
+    return name.replace(/[^\w\sÀ-ÿ.'-]/gi, '').replace(/\s+/g, ' ').trim();
+  };
 
-    if (cleanList.length > 0) {
-      setCustomPlayersDb(cleanList);
-      setUploadStatus(`✅ Listone caricato con successo (${cleanList.length} giocatori trovati)!`);
+  const parseAndAddPlayers = (rawPlayers) => {
+    const validRoles = ['P', 'D', 'C', 'A'];
+    const cleanList = rawPlayers
+      .map(p => {
+        const role = (p.role || '').toUpperCase().charAt(0);
+        const name = cleanPlayerName(p.name || '');
+        const team = cleanPlayerName(p.team || '');
+        return { name, role, team };
+      })
+      .filter(p => validRoles.includes(p.role) && p.name.length >= 2);
+
+    // Rimuovi duplicati
+    const uniqueMap = new Map();
+    cleanList.forEach(p => {
+      const key = `${p.name}_${p.role}_${p.team}`;
+      if (!uniqueMap.has(key)) uniqueMap.set(key, p);
+    });
+
+    const finalPlayers = Array.from(uniqueMap.values());
+
+    if (finalPlayers.length > 0) {
+      setCustomPlayersDb(finalPlayers);
+      setUploadStatus(`✅ Caricati con successo ${finalPlayers.length} calciatori nel listone!`);
     } else {
       setUploadStatus('❌ Nessun dato valido estratto dal file.');
     }
-  };
-
-  // Lettore universale PDF binario integrato (senza worker/CORS)
-  const parsePdfDirectly = async (arrayBuffer) => {
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = '';
-    const chunk = 8192;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-
-    const textChunks = [];
-    const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
-    let streamMatch;
-
-    while ((streamMatch = streamRegex.exec(binary)) !== null) {
-      const rawData = streamMatch[1];
-      const strMatches = rawData.match(/\(([^()]+)\)\s*Tj/g) || rawData.match(/\[(.*?)\]\s*TJ/g);
-      if (strMatches) {
-        strMatches.forEach(m => {
-          const cleaned = m.replace(/[()[\]TjTJ]/g, '').trim();
-          if (cleaned) textChunks.push(cleaned);
-        });
-      }
-    }
-
-    // Se il PDF è compresso o standard, estraiamo con regex testuale
-    const fullText = binary.replace(/[^\x20-\x7E\r\n\t]/g, ' ');
-    const tokens = fullText.split(/\s+/).filter(t => t.length > 0);
-    const parsed = [];
-
-    for (let i = 0; i < tokens.length; i++) {
-      const t = tokens[i];
-      const isRole = t.match(/^([PDCA])(\(.*\))?$/i);
-      if (isRole) {
-        const role = isRole[1].toUpperCase();
-        let name = tokens[i + 1] || '';
-        let team = tokens[i + 2] || '';
-
-        if (name && team && isNaN(name) && isNaN(team) && !name.startsWith('#') && !team.startsWith('#') && name.length > 1) {
-          if (!['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot'].includes(name)) {
-            parsed.push({ role, name, team });
-          }
-        }
-      }
-    }
-
-    return parsed;
   };
 
   const handleFileUpload = async (e) => {
@@ -343,14 +310,42 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = async () => {
         try {
-          const parsed = await parsePdfDirectly(reader.result);
-          if (parsed && parsed.length > 0) {
+          const typedarray = new Uint8Array(reader.result);
+          const loadingTask = pdfjsLib.getDocument({
+            data: typedarray,
+            nativeImageDecoderSupport: 'none',
+            disableFontFace: true
+          });
+          const pdf = await loadingTask.promise;
+          const parsed = [];
+
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const items = textContent.items.map(it => it.str.trim()).filter(Boolean);
+
+            for (let j = 0; j < items.length; j++) {
+              const item = items[j];
+              const roleMatch = item.match(/^([PDCA])(\(.*\))?$/i);
+              if (roleMatch) {
+                const role = roleMatch[1].toUpperCase();
+                const name = items[j + 1];
+                const team = items[j + 2];
+
+                if (name && team && isNaN(name) && isNaN(team) && !name.startsWith('#') && !team.startsWith('#')) {
+                  parsed.push({ role, name, team });
+                }
+              }
+            }
+          }
+
+          if (parsed.length > 0) {
             parseAndAddPlayers(parsed);
           } else {
-            setUploadStatus('❌ Impossibile leggere il PDF. Prova a salvare il listone in Excel/CSV o usa Copia-Incolla.');
+            setUploadStatus('❌ Impossibile leggere il layout di questo PDF.');
           }
         } catch (err) {
-          setUploadStatus('❌ Errore lettura PDF.');
+          setUploadStatus('❌ Errore durante la decodifica del PDF.');
         }
       };
       reader.readAsArrayBuffer(file);
@@ -442,7 +437,7 @@ export default function App() {
             <input
               type="text"
               required
-              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore dal listone..." : "Scrivi nome giocatore..."}
+              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore dal listone..." : "Carica prima il listone o scrivi il nome..."}
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
@@ -527,7 +522,7 @@ export default function App() {
 
             return (
               <div key={teamIdx} className="w-[280px] flex-shrink-0 flex flex-col bg-slate-900 border border-slate-800 rounded-lg overflow-hidden shadow h-full">
-                {/* Intestazione Squadra Editabile */}
+                {/* Intestazione Squadra */}
                 <div className="flex-shrink-0 bg-slate-800 p-2 border-b border-slate-700 text-center shadow">
                   <input
                     type="text"
@@ -546,7 +541,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Zona Giocatori con Scorrimento Interno */}
+                {/* Zona Giocatori */}
                 <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
                   {ROLES_CONFIG.map(roleConf => {
                     const roleKey = roleConf.key;
@@ -631,7 +626,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Finestra Modale Impostazioni Regole */}
+      {/* Finestra Modale Impostazioni */}
       {isConfigOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 shadow-2xl">
@@ -706,7 +701,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Finestra Modale Caricamento Listone */}
+      {/* Finestra Modale Listone */}
       {isUploadOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-5 shadow-2xl">
