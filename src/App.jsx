@@ -1,10 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Upload, FileText, CheckCircle2 } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Upload, CheckCircle2, Shield, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+const DEFAULT_PLAYERS = [
+  { name: 'Lautaro Martinez', team: 'Inter', role: 'A', price: 35 },
+  { name: 'Vlahovic', team: 'Juventus', role: 'A', price: 30 },
+  { name: 'Thuram', team: 'Inter', role: 'A', price: 29 },
+  { name: 'Leao', team: 'Milan', role: 'A', price: 18 },
+  { name: 'Dybala', team: 'Roma', role: 'A', price: 14 },
+  { name: 'Barella', team: 'Inter', role: 'C', price: 17 },
+  { name: 'Calhanoglu', team: 'Inter', role: 'C', price: 27 },
+  { name: 'Mctominay', team: 'Napoli', role: 'C', price: 28 },
+  { name: 'Pulisic', team: 'Milan', role: 'C', price: 25 },
+  { name: 'Zaccagni', team: 'Lazio', role: 'C', price: 16 },
+  { name: 'Dimarco', team: 'Inter', role: 'D', price: 32 },
+  { name: 'Theo Hernandez', team: 'Milan', role: 'D', price: 15 },
+  { name: 'Bremer', team: 'Juventus', role: 'D', price: 15 },
+  { name: 'Bastoni', team: 'Inter', role: 'D', price: 14 },
+  { name: 'Di Lorenzo', team: 'Napoli', role: 'D', price: 12 },
+  { name: 'Maignan', team: 'Milan', role: 'P', price: 15 },
+  { name: 'Di Gregorio', team: 'Juventus', role: 'P', price: 9 },
+  { name: 'Meret', team: 'Napoli', role: 'P', price: 11 },
+  { name: 'Svilar', team: 'Roma', role: 'P', price: 18 },
+  { name: 'Carnesecchi', team: 'Atalanta', role: 'P', price: 16 }
+];
 
 const ROLES_CONFIG = [
   { key: 'P', name: 'Portieri', count: 3, bg: 'bg-amber-950/20', border: 'border-amber-500/30', badge: 'bg-amber-500 text-slate-950' },
@@ -15,23 +38,27 @@ const ROLES_CONFIG = [
 
 export default function App() {
   const [totalBudget, setTotalBudget] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_custom_budget') || '500', 10);
+    return parseInt(localStorage.getItem('fanta_custom_budget_v2') || '500', 10);
   });
 
   const [hasDefMod, setHasDefMod] = useState(() => {
-    return localStorage.getItem('fanta_custom_mod_def') !== 'false';
+    return localStorage.getItem('fanta_custom_mod_def_v2') !== 'false';
   });
 
   const [hasTeamMod, setHasTeamMod] = useState(() => {
-    return localStorage.getItem('fanta_custom_mod_team') !== 'false';
+    return localStorage.getItem('fanta_custom_mod_team_v2') !== 'false';
+  });
+
+  const [useQuotationBase, setUseQuotationBase] = useState(() => {
+    return localStorage.getItem('fanta_custom_base_quot') === 'true';
   });
 
   const [teamCount, setTeamCount] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_custom_teams_count') || '8', 10);
+    return parseInt(localStorage.getItem('fanta_custom_teams_count_v2') || '8', 10);
   });
 
   const [teamNames, setTeamNames] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_team_names');
+    const saved = localStorage.getItem('fanta_custom_team_names_v2');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { }
     }
@@ -39,7 +66,7 @@ export default function App() {
   });
 
   const [teamsData, setTeamsData] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_teams_data');
+    const saved = localStorage.getItem('fanta_custom_teams_data_v2');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { }
     }
@@ -56,11 +83,14 @@ export default function App() {
   });
 
   const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db');
+    const saved = localStorage.getItem('fanta_custom_players_db_v2');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) { }
     }
-    return [];
+    return DEFAULT_PLAYERS;
   });
 
   const [history, setHistory] = useState([]);
@@ -78,14 +108,15 @@ export default function App() {
   const suggestionRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem('fanta_custom_budget', totalBudget.toString());
-    localStorage.setItem('fanta_custom_mod_def', hasDefMod.toString());
-    localStorage.setItem('fanta_custom_mod_team', hasTeamMod.toString());
-    localStorage.setItem('fanta_custom_teams_count', teamCount.toString());
-    localStorage.setItem('fanta_custom_team_names', JSON.stringify(teamNames));
-    localStorage.setItem('fanta_custom_teams_data', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db', JSON.stringify(customPlayersDb));
-  }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
+    localStorage.setItem('fanta_custom_budget_v2', totalBudget.toString());
+    localStorage.setItem('fanta_custom_mod_def_v2', hasDefMod.toString());
+    localStorage.setItem('fanta_custom_mod_team_v2', hasTeamMod.toString());
+    localStorage.setItem('fanta_custom_base_quot', useQuotationBase.toString());
+    localStorage.setItem('fanta_custom_teams_count_v2', teamCount.toString());
+    localStorage.setItem('fanta_custom_team_names_v2', JSON.stringify(teamNames));
+    localStorage.setItem('fanta_custom_teams_data_v2', JSON.stringify(teamsData));
+    localStorage.setItem('fanta_custom_players_db_v2', JSON.stringify(customPlayersDb));
+  }, [totalBudget, hasDefMod, hasTeamMod, useQuotationBase, teamCount, teamNames, teamsData, customPlayersDb]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -129,6 +160,11 @@ export default function App() {
     setQuickName(display);
     if (['P', 'D', 'C', 'A'].includes(player.role)) {
       setQuickRole(player.role);
+    }
+    if (useQuotationBase && player.price) {
+      setQuickPrice(player.price.toString());
+    } else {
+      setQuickPrice('');
     }
     setShowSuggestions(false);
   };
@@ -216,50 +252,63 @@ export default function App() {
   };
 
   const parseAndAddPlayers = (rawPlayers) => {
-    const cleanList = rawPlayers.filter(p => p.name && p.role).map(p => ({
-      name: p.name.trim(),
-      role: p.role.trim().toUpperCase().charAt(0),
-      team: (p.team || '').trim()
-    }));
+    const cleanList = rawPlayers.filter(p => p.name && p.role).map(p => {
+      let r = p.role.trim().toUpperCase().charAt(0);
+      if (!['P', 'D', 'C', 'A'].includes(r)) r = 'C';
+      return {
+        name: p.name.trim(),
+        role: r,
+        team: (p.team || '').trim(),
+        price: parseInt(p.price, 10) || 1
+      };
+    });
 
     if (cleanList.length > 0) {
       setCustomPlayersDb(cleanList);
-      setUploadStatus(`Caricati con successo ${cleanList.length} calciatori!`);
+      setUploadStatus(`✅ Caricati con successo ${cleanList.length} calciatori nel listone!`);
     } else {
-      setUploadStatus('Nessun dato valido trovato.');
+      setUploadStatus('❌ Nessun dato valido trovato. Controlla il formato del file.');
     }
   };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Lettura file in corso...');
+    setUploadStatus('⏳ Elaborazione del file in corso...');
 
     const ext = file.name.split('.').pop().toLowerCase();
 
     if (ext === 'xlsx' || ext === 'xls') {
       const reader = new FileReader();
       reader.onload = (evt) => {
-        const bstr = evt.target.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        const parsed = [];
-        rows.forEach(r => {
-          if (r.length >= 2) {
-            const roleCandidate = r.find(c => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(String(c).toUpperCase().trim()));
-            const nameCandidate = r.find(c => isNaN(c) && String(c).length > 2 && c !== roleCandidate);
-            if (roleCandidate && nameCandidate) {
-              parsed.push({
-                name: String(nameCandidate),
-                role: String(roleCandidate).charAt(0).toUpperCase(),
-                team: ''
-              });
+        try {
+          const bstr = evt.target.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          const parsed = [];
+
+          rows.forEach(r => {
+            if (Array.isArray(r) && r.length >= 2) {
+              const strRow = r.map(c => String(c).trim());
+              const roleIdx = strRow.findIndex(c => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(c.toUpperCase()));
+              if (roleIdx !== -1) {
+                const role = strRow[roleIdx].charAt(0).toUpperCase();
+                const name = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c.length > 1 && !['P', 'D', 'C', 'A'].includes(c.toUpperCase()));
+                const team = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c !== name && c.length > 1) || '';
+                const priceNum = strRow.find(c => !isNaN(c) && Number(c) > 0 && Number(c) < 500) || 1;
+
+                if (name) {
+                  parsed.push({ name, role, team, price: priceNum });
+                }
+              }
             }
-          }
-        });
-        parseAndAddPlayers(parsed);
+          });
+          parseAndAddPlayers(parsed);
+        } catch (err) {
+          setUploadStatus('❌ Errore durante la lettura del file Excel.');
+        }
       };
       reader.readAsBinaryString(file);
     } else if (ext === 'csv') {
@@ -268,14 +317,16 @@ export default function App() {
           const parsed = [];
           results.data.forEach(r => {
             if (Array.isArray(r) && r.length >= 2) {
-              const roleCandidate = r.find(c => ['P', 'D', 'C', 'A'].includes(String(c).toUpperCase().trim()));
-              const nameCandidate = r.find(c => isNaN(c) && String(c).length > 2 && c !== roleCandidate);
-              if (roleCandidate && nameCandidate) {
-                parsed.push({
-                  name: String(nameCandidate),
-                  role: String(roleCandidate).charAt(0).toUpperCase(),
-                  team: ''
-                });
+              const strRow = r.map(c => String(c).trim());
+              const roleIdx = strRow.findIndex(c => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(c.toUpperCase()));
+              if (roleIdx !== -1) {
+                const role = strRow[roleIdx].charAt(0).toUpperCase();
+                const name = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c.length > 1);
+                const team = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c !== name && c.length > 1) || '';
+                const priceNum = strRow.find(c => !isNaN(c) && Number(c) > 0) || 1;
+                if (name) {
+                  parsed.push({ name, role, team, price: priceNum });
+                }
               }
             }
           });
@@ -288,30 +339,50 @@ export default function App() {
         try {
           const typedarray = new Uint8Array(reader.result);
           const pdf = await pdfjsLib.getDocument(typedarray).promise;
-          let fullText = '';
+          const parsed = [];
+
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            fullText += textContent.items.map(item => item.str).join(' ') + '\n';
-          }
-          const lines = fullText.split('\n');
-          const parsed = [];
-          lines.forEach(line => {
-            const match = line.match(/\b([PDCA])\b/);
-            if (match) {
-              const words = line.split(/\s+/).filter(w => isNaN(w) && w.length > 2);
-              if (words.length > 0) {
-                parsed.push({
-                  name: words[0],
-                  role: match[1],
-                  team: words[1] || ''
-                });
+            const items = textContent.items.map(item => item.str.trim()).filter(Boolean);
+            const text = items.join(' | ');
+
+            const regex = /#\s*\d+\s*\|\s*([PDCA])(?:\([^)]*\))?\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*(\d+)/gi;
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+              parsed.push({
+                role: match[1].toUpperCase(),
+                name: match[2].trim(),
+                team: match[3].trim(),
+                price: parseInt(match[4], 10) || 1
+              });
+            }
+
+            if (parsed.length === 0) {
+              for (let j = 0; j < items.length; j++) {
+                const item = items[j];
+                if (item.match(/^#?\d+$/) && items[j + 1] && items[j + 1].match(/^[PDCA](\(.*\))?$/i)) {
+                  const role = items[j + 1].charAt(0).toUpperCase();
+                  const name = items[j + 2] || '';
+                  const team = items[j + 3] || '';
+                  const priceStr = items[j + 4] || '1';
+                  const price = parseInt(priceStr.replace(/\D/g, ''), 10) || 1;
+
+                  if (name && !name.startsWith('#')) {
+                    parsed.push({ role, name, team, price });
+                  }
+                }
               }
             }
-          });
-          parseAndAddPlayers(parsed);
+          }
+
+          if (parsed.length > 0) {
+            parseAndAddPlayers(parsed);
+          } else {
+            setUploadStatus('❌ Impossibile estrarre i dati dal PDF. Usa la casella Copia & Incolla.');
+          }
         } catch (err) {
-          setUploadStatus('Errore nella lettura del PDF.');
+          setUploadStatus('❌ Errore nel caricamento del file PDF.');
         }
       };
       reader.readAsArrayBuffer(file);
@@ -322,16 +393,26 @@ export default function App() {
     if (!pasteText.trim()) return;
     const lines = pasteText.split('\n');
     const parsed = [];
+
     lines.forEach(line => {
-      const parts = line.split(/[\t,;-]/);
+      const parts = line.split(/[\t,;|]/).map(p => p.trim()).filter(Boolean);
       if (parts.length >= 2) {
-        parsed.push({
-          name: parts[0].trim(),
-          role: parts[1].trim().toUpperCase().charAt(0),
-          team: parts[2] ? parts[2].trim() : ''
-        });
+        let role = parts.find(p => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(p.toUpperCase()));
+        let name = parts.find(p => p !== role && isNaN(p) && p.length > 1);
+        let team = parts.find(p => p !== role && p !== name && isNaN(p)) || '';
+        let price = parts.find(p => !isNaN(p) && Number(p) > 0) || 1;
+
+        if (name && role) {
+          parsed.push({
+            name,
+            role: role.charAt(0).toUpperCase(),
+            team,
+            price: parseInt(price, 10) || 1
+          });
+        }
       }
     });
+
     parseAndAddPlayers(parsed);
     setPasteText('');
   };
@@ -343,14 +424,18 @@ export default function App() {
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-black tracking-wide text-white">ASTA MANAGER 2026-2027</h1>
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
               <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
               <span>•</span>
               <span>Mod. Difesa: {hasDefMod ? '✅' : '❌'}</span>
               <span>•</span>
               <span>Mod. Squadra: {hasTeamMod ? '✅' : '❌'}</span>
               <span>•</span>
+              <span>Base Asta: <strong className="text-amber-300">{useQuotationBase ? 'Quotazione' : '1 Credito'}</strong></span>
+              <span>•</span>
               <span>Squadre: <strong className="text-emerald-400">{teamCount}</strong></span>
+              <span>•</span>
+              <span>Listone: <strong className="text-indigo-400">{customPlayersDb.length} gioc.</strong></span>
             </div>
           </div>
 
@@ -369,7 +454,7 @@ export default function App() {
               onClick={() => setIsUploadOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition"
             >
-              <Upload className="w-3.5 h-3.5" /> Carica Listone
+              <Upload className="w-3.5 h-3.5" /> Listone Calciatori
             </button>
 
             <button
@@ -393,7 +478,7 @@ export default function App() {
             <input
               type="text"
               required
-              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore..." : "Scrivi nome giocatore..."}
+              placeholder="Digita nome giocatore o squadra..."
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
@@ -401,7 +486,7 @@ export default function App() {
             />
 
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 max-h-60 overflow-y-auto">
+              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 max-h-64 overflow-y-auto">
                 {suggestions.map((p, idx) => (
                   <div
                     key={idx}
@@ -418,11 +503,18 @@ export default function App() {
                       </span>
                       <span className="font-bold text-white text-sm">{p.name}</span>
                     </div>
-                    {p.team && (
-                      <span className="text-xs text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                        {p.team}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {p.team && (
+                        <span className="text-xs text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                          {p.team}
+                        </span>
+                      )}
+                      {p.price && (
+                        <span className="text-xs font-black text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/40">
+                          Qt: {p.price}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -455,7 +547,7 @@ export default function App() {
             min="1"
             max={totalBudget}
             required
-            placeholder="Prezzo"
+            placeholder={useQuotationBase ? "Quotazione" : "Prezzo"}
             value={quickPrice}
             onChange={e => setQuickPrice(e.target.value)}
             className="w-24 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-base font-bold text-amber-300 text-center outline-none"
@@ -470,7 +562,7 @@ export default function App() {
         </form>
       </div>
 
-      {/* Tabellone con Colonne Dinamiche */}
+      {/* Tabellone Squadre */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
@@ -564,7 +656,7 @@ export default function App() {
                   })}
                 </div>
 
-                {/* Footer Crediti Residui con Fasce Dinamiche */}
+                {/* Footer Crediti Residui */}
                 <div className="flex-shrink-0 p-2 border-t border-slate-800 bg-slate-950 flex flex-col gap-1.5 shadow-lg">
                   <div className="flex justify-between items-center text-xs text-slate-300 px-1">
                     <span>Spesi: <strong className="text-white text-sm">{stats.totalSpent}</strong></span>
@@ -620,6 +712,18 @@ export default function App() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Modalità Base d'Asta Rilancio:</label>
+                <select
+                  value={useQuotationBase ? "QUOT" : "BASE1"}
+                  onChange={(e) => setUseQuotationBase(e.target.value === "QUOT")}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-amber-300 outline-none focus:border-emerald-500"
+                >
+                  <option value="BASE1">Partenza fissa da 1 Credito (Asta Libera)</option>
+                  <option value="QUOT">Partenza dal valore di Quotazione/Listone</option>
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">Modificatore Difesa:</label>
@@ -650,7 +754,7 @@ export default function App() {
                 onClick={() => setIsConfigOpen(false)}
                 className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition shadow"
               >
-                Salva e Chiudi
+                Salva Regole
               </button>
             </div>
           </div>
@@ -663,27 +767,27 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-5 shadow-2xl">
             <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Upload className="w-5 h-5 text-indigo-400" /> Carica Listone Calciatori
+                <Upload className="w-5 h-5 text-indigo-400" /> Gestione Listone Calciatori
               </h3>
               <button onClick={() => setIsUploadOpen(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Seleziona File (Excel .xlsx, CSV, o PDF):</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Seleziona File Listone (.pdf, .xlsx, .csv):</label>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv,.pdf"
                   onChange={handleFileUpload}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
                 />
               </div>
 
               <div className="border-t border-slate-800 pt-3">
-                <label className="block text-xs font-bold text-slate-300 mb-1">Oppure Copia & Incolla (Nome, Ruolo, Squadra):</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Oppure Incolla Righe di Testo:</label>
                 <textarea
                   rows="3"
-                  placeholder="Es: Lautaro Martinez, A, Inter&#10;Dimarco, D, Inter"
+                  placeholder="Es: Lautaro Martinez, A, Inter, 35&#10;Dimarco, D, Inter, 32"
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
@@ -699,7 +803,7 @@ export default function App() {
 
               {uploadStatus && (
                 <div className="p-2.5 rounded bg-slate-950 border border-indigo-500/40 text-xs text-indigo-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> {uploadStatus}
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {uploadStatus}
                 </div>
               )}
 
