@@ -14,6 +14,7 @@ export default function App() {
   const [roomId, setRoomId] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [myTeamIndex, setMyTeamIndex] = useState(null);
+  const [targetTeamIndex, setTargetTeamIndex] = useState(0); // Per selezione squadra Gestore
   const [inLobby, setInLobby] = useState(true);
 
   // Dati stanza
@@ -159,6 +160,7 @@ export default function App() {
     setRoomId(code);
     setIsHost(true);
     setMyTeamIndex(0);
+    setTargetTeamIndex(0);
     setInLobby(false);
     window.history.pushState({}, '', `?room=${code}`);
   };
@@ -228,6 +230,7 @@ export default function App() {
   };
 
   const handleCellChange = async (teamIdx, role, index, field, value) => {
+    // Permesso: se non sei Gestore, puoi modificare solo la tua squadra e se non è bloccata
     if (!isHost) {
       if (myTeamIndex !== teamIdx) return;
       if (lockedRoles[role]) {
@@ -272,8 +275,11 @@ export default function App() {
   const handleQuickAssign = async (e) => {
     e.preventDefault();
     if (!quickName.trim()) return;
-    if (myTeamIndex === null) {
-      alert("Seleziona prima la tua squadra in alto!");
+
+    const actualTeamIdx = isHost ? targetTeamIndex : myTeamIndex;
+
+    if (actualTeamIdx === null) {
+      alert("Seleziona prima quale squadra assegnare!");
       return;
     }
 
@@ -282,16 +288,16 @@ export default function App() {
       return;
     }
 
-    const teamSlots = teamsData[myTeamIndex][quickRole];
+    const teamSlots = teamsData[actualTeamIdx][quickRole];
     const emptyIndex = teamSlots.findIndex(s => !s.name || s.name.trim() === '');
 
     if (emptyIndex === -1) {
-      alert(`Attenzione: ${teamNames[myTeamIndex]} ha già completato i posti per il ruolo ${quickRole}!`);
+      alert(`Attenzione: ${teamNames[actualTeamIdx]} ha già completato i posti per il ruolo ${quickRole}!`);
       return;
     }
 
     const finalPrice = quickPrice === '' ? 1 : Math.max(1, parseInt(quickPrice, 10) || 1);
-    const updatedTeam = { ...teamsData[myTeamIndex] };
+    const updatedTeam = { ...teamsData[actualTeamIdx] };
     const updatedRole = [...updatedTeam[quickRole]];
     updatedRole[emptyIndex] = {
       name: quickName.trim(),
@@ -299,7 +305,7 @@ export default function App() {
     };
     updatedTeam[quickRole] = updatedRole;
 
-    const nextTeams = { ...teamsData, [myTeamIndex]: updatedTeam };
+    const nextTeams = { ...teamsData, [actualTeamIdx]: updatedTeam };
     const nextHist = [...history.slice(-20), JSON.stringify(teamsData)];
 
     await pushStateToSupabase(nextTeams, nextHist);
@@ -377,14 +383,14 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // SCHERMATA LOBBY
+  // LOBBY INIZIALE
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-black text-white tracking-wide">ASTA FANTACALCIO LIVE</h1>
-            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale con blocco antifrode</p>
+            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale con controllo Gestore completo</p>
           </div>
 
           <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
@@ -434,31 +440,38 @@ export default function App() {
     );
   }
 
-  // TABELLONE LIVE
+  // TABELLONE ASTA IN DIRETTA
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* 1. Header */}
+      {/* 1. Header Principale Fissa */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-lg">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-black text-emerald-300">LIVE: {roomId}</span>
+              <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost && '(GESTORE)'}</span>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-              <span className="text-slate-400 font-bold">La tua squadra:</span>
-              <select
-                value={myTeamIndex === null ? '' : myTeamIndex}
-                onChange={(e) => setMyTeamIndex(e.target.value === '' ? null : parseInt(e.target.value, 10))}
-                className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
-              >
-                <option value="">-- Seleziona squadra --</option>
-                {Array.from({ length: teamCount }).map((_, idx) => (
-                  <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
-                ))}
-              </select>
-            </div>
+            {/* Selettore Squadra: Per Ospite è la propria, per il Gestore è facoltativo */}
+            {!isHost ? (
+              <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
+                <span className="text-slate-400 font-bold">La tua squadra:</span>
+                <select
+                  value={myTeamIndex === null ? '' : myTeamIndex}
+                  onChange={(e) => setMyTeamIndex(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                  className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
+                >
+                  <option value="">-- Seleziona la tua squadra --</option>
+                  {Array.from({ length: teamCount }).map((_, idx) => (
+                    <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300">
+                <ShieldCheck className="w-3.5 h-3.5" /> Accesso Totale Gestore
+              </div>
+            )}
 
             <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
               <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
@@ -514,15 +527,32 @@ export default function App() {
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <PlusCircle className="w-4 h-4" /> Assegna a {myTeamIndex !== null ? <strong className="text-white underline">{teamNames[myTeamIndex]}</strong> : 'tua squadra'}:
+            <PlusCircle className="w-4 h-4" /> Assegna a:
           </span>
+
+          {/* Selezione squadra: Visibile sempre per il Gestore, fissa per l'ospite */}
+          {isHost ? (
+            <select
+              value={targetTeamIndex}
+              onChange={e => setTargetTeamIndex(parseInt(e.target.value, 10))}
+              className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-emerald-300 outline-none cursor-pointer"
+            >
+              {Array.from({ length: teamCount }).map((_, idx) => (
+                <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-sm font-bold text-white bg-slate-950 px-2 py-1 rounded border border-slate-700">
+              {myTeamIndex !== null ? teamNames[myTeamIndex] : 'Nessuna squadra'}
+            </span>
+          )}
 
           <div className="flex-1 min-w-[260px] relative" ref={suggestionRef}>
             <input
               type="text"
               required
-              disabled={myTeamIndex === null}
-              placeholder={myTeamIndex === null ? "⚠️ Seleziona prima la tua squadra in alto!" : "Digita nome giocatore (es. Lautaro, Dimarco)..."}
+              disabled={!isHost && myTeamIndex === null}
+              placeholder={!isHost && myTeamIndex === null ? "⚠️ Seleziona prima la tua squadra in alto!" : "Digita nome giocatore (es. Lautaro, Dimarco)..."}
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
@@ -560,7 +590,7 @@ export default function App() {
 
           <select
             value={quickRole}
-            disabled={myTeamIndex === null}
+            disabled={!isHost && myTeamIndex === null}
             onChange={e => setQuickRole(e.target.value)}
             className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-white outline-none cursor-pointer disabled:opacity-50"
           >
@@ -575,7 +605,7 @@ export default function App() {
             min="1"
             max={totalBudget}
             required
-            disabled={myTeamIndex === null}
+            disabled={!isHost && myTeamIndex === null}
             placeholder="Prezzo"
             value={quickPrice}
             onChange={e => setQuickPrice(e.target.value)}
@@ -584,7 +614,7 @@ export default function App() {
 
           <button
             type="submit"
-            disabled={myTeamIndex === null}
+            disabled={!isHost && myTeamIndex === null}
             className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-sm font-bold rounded shadow transition cursor-pointer"
           >
             Conferma Acquisto
@@ -592,12 +622,13 @@ export default function App() {
         </form>
       </div>
 
-      {/* 3. Tabellone */}
+      {/* 3. Tabellone Squadre */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
             const stats = getTeamStats(teamIdx);
             const isMyTeam = myTeamIndex === teamIdx;
+            // Il Gestore ha sempre il permesso di modifica; l'ospite solo sulla propria squadra
             const canEditThisColumn = isHost || isMyTeam;
 
             return (
@@ -632,7 +663,9 @@ export default function App() {
 
                   <div className="flex justify-between items-center text-xs mt-1 px-1 text-slate-300">
                     <span className="flex items-center gap-1">
-                      {isMyTeam ? (
+                      {isHost ? (
+                        <span className="text-emerald-400 font-bold">● Gestore (Modifica attiva)</span>
+                      ) : isMyTeam ? (
                         <span className="text-emerald-400 font-bold">● La tua squadra</span>
                       ) : (
                         <span className="text-slate-500 flex items-center gap-0.5"><Lock className="w-3 h-3" /> Sola lettura</span>
@@ -650,6 +683,8 @@ export default function App() {
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
                     const isRoleLocked = lockedRoles[roleKey];
+                    
+                    // Il Gestore può sempre modificare; l'ospite può modificare solo la sua colonna e solo se non è lockato
                     const canEditSlot = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
@@ -660,7 +695,6 @@ export default function App() {
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
                           </span>
 
-                          {/* Pulsante Gestore o Badge Blocco */}
                           {isHost ? (
                             <button
                               type="button"
