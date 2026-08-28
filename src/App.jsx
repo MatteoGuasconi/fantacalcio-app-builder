@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Upload, CheckCircle2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
+import { PlusCircle, RotateCcw, X, Settings } from 'lucide-react';
+import { OFFICIAL_PLAYERS_DB } from './playersData';
 
 const ROLES_CONFIG = [
   { key: 'P', name: 'Portieri', count: 3, bg: 'bg-amber-950/20', border: 'border-amber-500/30', badge: 'bg-amber-500 text-slate-950' },
@@ -12,23 +11,23 @@ const ROLES_CONFIG = [
 
 export default function App() {
   const [totalBudget, setTotalBudget] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_custom_budget_final') || '500', 10);
+    return parseInt(localStorage.getItem('fanta_builder_budget') || '500', 10);
   });
 
   const [hasDefMod, setHasDefMod] = useState(() => {
-    return localStorage.getItem('fanta_custom_mod_def_final') !== 'false';
+    return localStorage.getItem('fanta_builder_mod_def') !== 'false';
   });
 
   const [hasTeamMod, setHasTeamMod] = useState(() => {
-    return localStorage.getItem('fanta_custom_mod_team_final') !== 'false';
+    return localStorage.getItem('fanta_builder_mod_team') !== 'false';
   });
 
   const [teamCount, setTeamCount] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_custom_teams_count_final') || '8', 10);
+    return parseInt(localStorage.getItem('fanta_builder_team_count') || '8', 10);
   });
 
   const [teamNames, setTeamNames] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_team_names_final');
+    const saved = localStorage.getItem('fanta_builder_team_names');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { }
     }
@@ -36,7 +35,7 @@ export default function App() {
   });
 
   const [teamsData, setTeamsData] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_teams_data_final');
+    const saved = localStorage.getItem('fanta_builder_teams_data');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { }
     }
@@ -52,17 +51,6 @@ export default function App() {
     return initial;
   });
 
-  const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db_final');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch (e) { }
-    }
-    return [];
-  });
-
   const [history, setHistory] = useState([]);
   const [quickName, setQuickName] = useState('');
   const [quickRole, setQuickRole] = useState('P');
@@ -71,21 +59,17 @@ export default function App() {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [pasteText, setPasteText] = useState('');
-  const [uploadStatus, setUploadStatus] = useState('');
 
   const suggestionRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem('fanta_custom_budget_final', totalBudget.toString());
-    localStorage.setItem('fanta_custom_mod_def_final', hasDefMod.toString());
-    localStorage.setItem('fanta_custom_mod_team_final', hasTeamMod.toString());
-    localStorage.setItem('fanta_custom_teams_count_final', teamCount.toString());
-    localStorage.setItem('fanta_custom_team_names_final', JSON.stringify(teamNames));
-    localStorage.setItem('fanta_custom_teams_data_final', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db_final', JSON.stringify(customPlayersDb));
-  }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
+    localStorage.setItem('fanta_builder_budget', totalBudget.toString());
+    localStorage.setItem('fanta_builder_mod_def', hasDefMod.toString());
+    localStorage.setItem('fanta_builder_mod_team', hasTeamMod.toString());
+    localStorage.setItem('fanta_builder_team_count', teamCount.toString());
+    localStorage.setItem('fanta_builder_team_names', JSON.stringify(teamNames));
+    localStorage.setItem('fanta_builder_teams_data', JSON.stringify(teamsData));
+  }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -111,9 +95,9 @@ export default function App() {
 
   const handleNameSearchChange = (value) => {
     setQuickName(value);
-    if (value.trim().length >= 1 && customPlayersDb.length > 0) {
+    if (value.trim().length >= 1) {
       const q = value.toLowerCase();
-      const filtered = customPlayersDb.filter(p =>
+      const filtered = OFFICIAL_PLAYERS_DB.filter(p =>
         p.name.toLowerCase().includes(q) ||
         (p.team && p.team.toLowerCase().includes(q))
       ).slice(0, 10);
@@ -216,154 +200,15 @@ export default function App() {
     }
   };
 
-  const parseAndAddPlayers = (rawPlayers) => {
-    const validRoles = ['P', 'D', 'C', 'A'];
-    const cleanList = [];
-    const seen = new Set();
-
-    rawPlayers.forEach(p => {
-      let role = (p.role || '').toUpperCase().trim();
-      if (role.startsWith('P')) role = 'P';
-      else if (role.startsWith('D')) role = 'D';
-      else if (role.startsWith('C')) role = 'C';
-      else if (role.startsWith('A')) role = 'A';
-
-      let name = (p.name || '').replace(/^[#\d\s|.-]+/, '').trim();
-      let team = (p.team || '').replace(/^[#\d\s|.-]+/, '').trim();
-
-      if (validRoles.includes(role) && name.length >= 2 && !['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot'].includes(name)) {
-        const key = `${name.toLowerCase()}_${role}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          cleanList.push({ name, role, team });
-        }
-      }
-    });
-
-    if (cleanList.length > 0) {
-      setCustomPlayersDb(cleanList);
-      setUploadStatus(`✅ Listone caricato con successo (${cleanList.length} calciatori registrati)!`);
-    } else {
-      setUploadStatus('❌ Nessun dato valido estratto. Controlla il formato del file.');
-    }
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploadStatus('⏳ Elaborazione del file in corso...');
-
-    const ext = file.name.split('.').pop().toLowerCase();
-
-    if (ext === 'xlsx' || ext === 'xls') {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-          const parsed = [];
-
-          rows.forEach(r => {
-            if (Array.isArray(r) && r.length >= 2) {
-              const strRow = r.map(c => String(c).trim());
-              const roleIdx = strRow.findIndex(c => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(c.toUpperCase()));
-              if (roleIdx !== -1) {
-                const role = strRow[roleIdx].charAt(0).toUpperCase();
-                const name = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c.length > 1 && !['P', 'D', 'C', 'A'].includes(c.toUpperCase()));
-                const team = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c !== name && c.length > 1) || '';
-                if (name) parsed.push({ name, role, team });
-              }
-            }
-          });
-          parseAndAddPlayers(parsed);
-        } catch (err) {
-          setUploadStatus('❌ Errore durante la lettura del file Excel.');
-        }
-      };
-      reader.readAsBinaryString(file);
-    } else if (ext === 'csv') {
-      Papa.parse(file, {
-        complete: (results) => {
-          const parsed = [];
-          results.data.forEach(r => {
-            if (Array.isArray(r) && r.length >= 2) {
-              const strRow = r.map(c => String(c).trim());
-              const roleIdx = strRow.findIndex(c => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(c.toUpperCase()));
-              if (roleIdx !== -1) {
-                const role = strRow[roleIdx].charAt(0).toUpperCase();
-                const name = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c.length > 1);
-                const team = strRow.find((c, idx) => idx !== roleIdx && isNaN(c) && c !== name && c.length > 1) || '';
-                if (name) parsed.push({ name, role, team });
-              }
-            }
-          });
-          parseAndAddPlayers(parsed);
-        }
-      });
-    } else if (ext === 'pdf') {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const base64 = reader.result.split(',')[1];
-          const response = await fetch('/api/parse-pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64 })
-          });
-
-          const resData = await response.json();
-          if (resData.players && resData.players.length > 0) {
-            parseAndAddPlayers(resData.players);
-          } else {
-            setUploadStatus('❌ Nessun calciatore trovato nel PDF.');
-          }
-        } catch (err) {
-          console.error(err);
-          setUploadStatus('❌ Errore durante la scansione del PDF.');
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handlePasteImport = () => {
-    if (!pasteText.trim()) return;
-    const lines = pasteText.split('\n');
-    const parsed = [];
-
-    lines.forEach(line => {
-      const parts = line.split(/[\t,|;]+/).map(p => p.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        let role = parts.find(p => ['P', 'D', 'C', 'A', 'POR', 'DIF', 'CEN', 'ATT'].includes(p.toUpperCase().charAt(0)));
-        let name = parts.find(p => p !== role && isNaN(p) && p.length > 1 && !p.startsWith('#'));
-        let team = parts.find(p => p !== role && p !== name && isNaN(p) && !p.startsWith('#')) || '';
-
-        if (name && role) {
-          parsed.push({
-            name,
-            role: role.charAt(0).toUpperCase(),
-            team
-          });
-        }
-      }
-    });
-
-    parseAndAddPlayers(parsed);
-    setPasteText('');
-  };
-
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* Header */}
+      {/* Header Fissa in Cima */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-black tracking-wide text-white">ASTA MANAGER 2026-2027</h1>
+            <h1 className="text-xl font-black tracking-wide text-white">ASTA FANTACALCIO 2026-2027</h1>
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
-              <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
+              <span>Budget: <strong className="text-emerald-400">{totalBudget} crediti</strong></span>
               <span>•</span>
               <span>Mod. Difesa: {hasDefMod ? '✅' : '❌'}</span>
               <span>•</span>
@@ -371,7 +216,7 @@ export default function App() {
               <span>•</span>
               <span>Squadre: <strong className="text-emerald-400">{teamCount}</strong></span>
               <span>•</span>
-              <span>Listone: <strong className="text-indigo-400">{customPlayersDb.length} giocatori</strong></span>
+              <span>Listone: <strong className="text-indigo-400">{OFFICIAL_PLAYERS_DB.length} giocatori</strong></span>
             </div>
           </div>
 
@@ -387,15 +232,8 @@ export default function App() {
             )}
 
             <button
-              onClick={() => setIsUploadOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition"
-            >
-              <Upload className="w-3.5 h-3.5" /> Listone Calciatori
-            </button>
-
-            <button
               onClick={() => setIsConfigOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white rounded shadow transition"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded shadow transition"
             >
               <Settings className="w-3.5 h-3.5" /> Regole & Squadre
             </button>
@@ -403,7 +241,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Barra Assegnazione Rapida */}
+      {/* Barra Assegnazione Rapida Fissa */}
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
@@ -414,7 +252,7 @@ export default function App() {
             <input
               type="text"
               required
-              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore dal listone..." : "Carica prima il listone o scrivi il nome..."}
+              placeholder="Digita nome giocatore (es. Lautaro, Dimarco)..."
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
@@ -491,7 +329,7 @@ export default function App() {
         </form>
       </div>
 
-      {/* Tabellone Squadre */}
+      {/* Tabellone con Nomi e Totali Fissi e Scorrimento Giocatori al Centro */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
@@ -499,7 +337,7 @@ export default function App() {
 
             return (
               <div key={teamIdx} className="w-[280px] flex-shrink-0 flex flex-col bg-slate-900 border border-slate-800 rounded-lg overflow-hidden shadow h-full">
-                {/* Intestazione Squadra */}
+                {/* Intestazione Squadra Editabile Fissa */}
                 <div className="flex-shrink-0 bg-slate-800 p-2 border-b border-slate-700 text-center shadow">
                   <input
                     type="text"
@@ -518,7 +356,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Zona Giocatori */}
+                {/* Zona Giocatori con Scorrimento Interno */}
                 <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
                   {ROLES_CONFIG.map(roleConf => {
                     const roleKey = roleConf.key;
@@ -585,7 +423,7 @@ export default function App() {
                   })}
                 </div>
 
-                {/* Footer Crediti Residui */}
+                {/* Footer Crediti Residui Fisso in Basso */}
                 <div className="flex-shrink-0 p-2 border-t border-slate-800 bg-slate-950 flex flex-col gap-1.5 shadow-lg">
                   <div className="flex justify-between items-center text-xs text-slate-300 px-1">
                     <span>Spesi: <strong className="text-white text-sm">{stats.totalSpent}</strong></span>
@@ -603,7 +441,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Finestra Modale Impostazioni */}
+      {/* Finestra Modale Impostazioni Regole */}
       {isConfigOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 shadow-2xl">
@@ -672,63 +510,6 @@ export default function App() {
                 className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition shadow"
               >
                 Salva Regole
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Finestra Modale Listone */}
-      {isUploadOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-5 shadow-2xl">
-            <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Upload className="w-5 h-5 text-indigo-400" /> Carica Listone Calciatori ({customPlayersDb.length} caricati)
-              </h3>
-              <button onClick={() => setIsUploadOpen(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Seleziona File Listone (.pdf, .xlsx, .csv):</label>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv,.pdf"
-                  onChange={handleFileUpload}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
-                />
-              </div>
-
-              <div className="border-t border-slate-800 pt-3">
-                <label className="block text-xs font-bold text-slate-300 mb-1">Oppure Incolla Righe di Testo (Nome, Ruolo, Squadra):</label>
-                <textarea
-                  rows="3"
-                  placeholder="Es: Lautaro Martinez, A, Inter&#10;Dimarco, D, Inter"
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handlePasteImport}
-                  className="mt-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded text-slate-200 transition"
-                >
-                  Importa Testo
-                </button>
-              </div>
-
-              {uploadStatus && (
-                <div className="p-2.5 rounded bg-slate-950 border border-indigo-500/40 text-xs text-indigo-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {uploadStatus}
-                </div>
-              )}
-
-              <button
-                onClick={() => setIsUploadOpen(false)}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg transition shadow"
-              >
-                Chiudi Finestra
               </button>
             </div>
           </div>
