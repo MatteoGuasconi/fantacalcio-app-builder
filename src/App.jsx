@@ -57,7 +57,6 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
-  // Rileva link d'invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -84,7 +83,6 @@ export default function App() {
     }
   }, []);
 
-  // Supabase Realtime
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -136,7 +134,6 @@ export default function App() {
     }).eq('id', roomId);
   };
 
-  // Creazione Stanza con PIN
   const handleCreateRoom = async (e) => {
     e.preventDefault();
     const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
@@ -216,7 +213,7 @@ export default function App() {
       setIsHost(true);
       setIsPinModalOpen(false);
       setEnteredPin('');
-      alert("Accesso Gestore confermato con successo!");
+      alert("Privilegi Gestore sbloccati!");
     } else {
       alert("PIN errato! Accesso Gestore negato.");
     }
@@ -262,15 +259,13 @@ export default function App() {
   };
 
   const handleCellChange = async (teamIdx, role, index, field, value) => {
-    // Controllo antifrode rigido
+    // BLOCCO RIGIDO DI SICUREZZA
     if (!isHost) {
       if (myTeamIndex !== teamIdx) {
-        alert("Non puoi modificare le squadre degli altri partecipanti!");
-        return;
+        return; // Impossibile modificare squadre altrui
       }
-      if (lockedRoles[role]) {
-        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore! Modifica non consentita.`);
-        return;
+      if (lockedRoles[role] === true) {
+        return; // Impossibile modificare se il reparto è convalidato dal Gestore
       }
     }
 
@@ -291,10 +286,7 @@ export default function App() {
   const handleClearSlot = async (teamIdx, role, index) => {
     if (!isHost) {
       if (myTeamIndex !== teamIdx) return;
-      if (lockedRoles[role]) {
-        alert(`Il reparto ${role} è bloccato dal Gestore!`);
-        return;
-      }
+      if (lockedRoles[role] === true) return;
     }
 
     const updatedTeam = { ...teamsData[teamIdx] };
@@ -313,8 +305,8 @@ export default function App() {
 
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
-    if (!isHost && lockedRoles[quickRole]) {
-      alert(`Il reparto ${quickRole} è bloccato dal Gestore! Impossibile assegnare nuovi acquisti.`);
+    if (!isHost && lockedRoles[quickRole] === true) {
+      alert(`Il reparto ${quickRole} è bloccato dal Gestore! Impossibile inserire nuovi acquisti.`);
       return;
     }
 
@@ -413,7 +405,7 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // LOBBY INIZIALE
+  // SCHERMATA LOBBY INIZIALE
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
@@ -542,14 +534,14 @@ export default function App() {
                 <div className="flex gap-2">
                   <button
                     type="submit"
-                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
+                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition cursor-pointer"
                   >
                     Verifica
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsPinModalOpen(false)}
-                    className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs"
+                    className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs cursor-pointer"
                   >
                     Annulla
                   </button>
@@ -574,9 +566,9 @@ export default function App() {
               <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '👑 (GESTORE)' : `👤 (${teamNames[myTeamIndex]})`}</span>
             </div>
 
-            {/* Menu Squadre per Ospite o Modalità Gestore */}
+            {/* Ruolo attivo */}
             <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-              <span className="text-slate-400 font-bold">La tua squadra:</span>
+              <span className="text-slate-400 font-bold">Ruolo attivo:</span>
               <select
                 value={isHost ? 'host' : myTeamIndex}
                 onChange={(e) => {
@@ -600,7 +592,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsPinModalOpen(true)}
-                className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition"
+                className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition cursor-pointer"
               >
                 <KeyRound className="w-3 h-3" /> Sblocca Gestore
               </button>
@@ -656,7 +648,7 @@ export default function App() {
             <button
               onClick={() => setInLobby(true)}
               title="Esci dall'Asta"
-              className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded border border-slate-700 transition"
+              className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded border border-slate-700 transition cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
             </button>
@@ -671,7 +663,6 @@ export default function App() {
             <PlusCircle className="w-4 h-4" /> Assegna a:
           </span>
 
-          {/* Selezione squadra */}
           {isHost ? (
             <select
               value={selectedTargetTeam}
@@ -817,14 +808,14 @@ export default function App() {
                     const slots = teamsData[teamIdx][roleKey];
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
-                    const isRoleLocked = lockedRoles[roleKey];
-                    
-                    // Protezione Antifrode Totale
-                    const canEditSlot = isHost || (isMyTeam && !isRoleLocked);
+                    const isRoleLocked = lockedRoles[roleKey] === true;
+
+                    // Regola ferrea: per poter editare devi essere il Gestore, oppure deve essere la tua squadra E il reparto non deve essere lockato
+                    const isEditable = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
                       <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
-                        {/* Tasto Blocca Sopra al Reparto & Badge */}
+                        {/* Barra superiore reparto */}
                         <div className="flex justify-between items-center mb-1.5 px-0.5">
                           <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${roleConf.badge}`}>
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
@@ -845,8 +836,8 @@ export default function App() {
                             </button>
                           ) : (
                             isRoleLocked && (
-                              <span className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/40 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded">
-                                <Lock className="w-2.5 h-2.5" /> Bloccato
+                              <span className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/40 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
+                                <Lock className="w-2.5 h-2.5" /> Reparto Bloccato
                               </span>
                             )
                           )}
@@ -864,27 +855,33 @@ export default function App() {
                             <div key={idx} className="flex items-center gap-1">
                               <input
                                 type="text"
-                                disabled={!canEditSlot}
+                                readOnly={!isEditable}
+                                disabled={!isEditable}
                                 placeholder={`${roleKey}${idx + 1}`}
                                 value={slot.name}
-                                onChange={e => handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
-                                className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white focus:outline-none whitespace-nowrap overflow-x-auto ${
-                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-400 cursor-not-allowed'
+                                onChange={e => isEditable && handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
+                                className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white whitespace-nowrap overflow-x-auto ${
+                                  isEditable
+                                    ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400 focus:outline-none' 
+                                    : 'bg-slate-900/90 border border-slate-800 text-slate-400 cursor-not-allowed select-none opacity-80'
                                 }`}
                               />
                               <input
                                 type="number"
                                 min="0"
                                 max={totalBudget}
-                                disabled={!canEditSlot}
+                                readOnly={!isEditable}
+                                disabled={!isEditable}
                                 placeholder="€"
                                 value={slot.price}
-                                onChange={e => handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
-                                className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center focus:outline-none ${
-                                  canEditSlot ? 'bg-slate-950 border border-slate-700 text-amber-400 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/70 cursor-not-allowed'
+                                onChange={e => isEditable && handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
+                                className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center ${
+                                  isEditable
+                                    ? 'bg-slate-950 border border-slate-700 text-amber-400 focus:border-emerald-400 focus:outline-none' 
+                                    : 'bg-slate-900/90 border border-slate-800 text-amber-500/70 cursor-not-allowed select-none opacity-80'
                                 }`}
                               />
-                              {canEditSlot && slot.name ? (
+                              {isEditable && slot.name ? (
                                 <button
                                   type="button"
                                   onClick={() => handleClearSlot(teamIdx, roleKey, idx)}
@@ -938,7 +935,7 @@ export default function App() {
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Settings className="w-5 h-5 text-emerald-400" /> Configura Regole Lega (Stanza: {roomId})
               </h3>
-              <button onClick={() => setIsConfigOpen(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+              <button onClick={() => setIsConfigOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
             <div className="space-y-4">
@@ -986,7 +983,7 @@ export default function App() {
                       setHasDefMod(mod);
                       pushStateToSupabase(teamsData, history, { hasDefMod: mod });
                     }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none cursor-pointer"
                   >
                     <option value="SI">Attivo ✅</option>
                     <option value="NO">Disattivo ❌</option>
@@ -1002,7 +999,7 @@ export default function App() {
                       setHasTeamMod(mod);
                       pushStateToSupabase(teamsData, history, { hasTeamMod: mod });
                     }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none cursor-pointer"
                   >
                     <option value="SI">Attivo ✅</option>
                     <option value="NO">Disattivo ❌</option>
@@ -1021,12 +1018,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal Verifica PIN per passare a Gestore ad asta in corso */}
+      {/* Modal Verifica PIN per Gestore */}
       {isPinModalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-emerald-400" /> Sblocca Privilegi Gestore
+              <KeyRound className="w-4 h-4 text-emerald-400" /> Inserisci PIN Gestore
             </h3>
             <form onSubmit={handleVerifyHostPin} className="space-y-3">
               <input
@@ -1041,14 +1038,14 @@ export default function App() {
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
+                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition cursor-pointer"
                 >
                   Conferma
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsPinModalOpen(false)}
-                  className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs"
+                  className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs cursor-pointer"
                 >
                   Annulla
                 </button>
