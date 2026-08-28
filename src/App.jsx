@@ -13,8 +13,8 @@ const ROLES_CONFIG = [
 export default function App() {
   const [roomId, setRoomId] = useState('');
   const [isHost, setIsHost] = useState(false);
-  const [myTeamIndex, setMyTeamIndex] = useState(null);
-  const [targetTeamIndex, setTargetTeamIndex] = useState(0); // Per selezione squadra Gestore
+  const [myTeamIndex, setMyTeamIndex] = useState(0);
+  const [selectedTargetTeam, setSelectedTargetTeam] = useState(0);
   const [inLobby, setInLobby] = useState(true);
 
   // Dati stanza
@@ -63,8 +63,13 @@ export default function App() {
   useEffect(() => {
     if (!roomId) return;
 
+    const savedHost = localStorage.getItem(`fanta_host_${roomId}`) === 'true';
+    if (savedHost) {
+      setIsHost(true);
+    }
+
     const fetchRoom = async () => {
-      const { data, error } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+      const { data } = await supabase.from('rooms').select('*').eq('id', roomId).single();
       if (data) {
         setTotalBudget(data.budget);
         setHasDefMod(data.has_def_mod);
@@ -157,10 +162,11 @@ export default function App() {
       return;
     }
 
+    localStorage.setItem(`fanta_host_${code}`, 'true');
     setRoomId(code);
     setIsHost(true);
     setMyTeamIndex(0);
-    setTargetTeamIndex(0);
+    setSelectedTargetTeam(0);
     setInLobby(false);
     window.history.pushState({}, '', `?room=${code}`);
   };
@@ -177,7 +183,8 @@ export default function App() {
     }
 
     setRoomId(code);
-    setIsHost(false);
+    const hostCheck = localStorage.getItem(`fanta_host_${code}`) === 'true';
+    setIsHost(hostCheck);
     setTotalBudget(data.budget);
     setHasDefMod(data.has_def_mod);
     setHasTeamMod(data.has_team_mod);
@@ -230,7 +237,6 @@ export default function App() {
   };
 
   const handleCellChange = async (teamIdx, role, index, field, value) => {
-    // Permesso: se non sei Gestore, puoi modificare solo la tua squadra e se non è bloccata
     if (!isHost) {
       if (myTeamIndex !== teamIdx) return;
       if (lockedRoles[role]) {
@@ -276,28 +282,23 @@ export default function App() {
     e.preventDefault();
     if (!quickName.trim()) return;
 
-    const actualTeamIdx = isHost ? targetTeamIndex : myTeamIndex;
-
-    if (actualTeamIdx === null) {
-      alert("Seleziona prima quale squadra assegnare!");
-      return;
-    }
+    const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && lockedRoles[quickRole]) {
       alert(`Il reparto selezionato (${quickRole}) è bloccato e convalidato dal Gestore!`);
       return;
     }
 
-    const teamSlots = teamsData[actualTeamIdx][quickRole];
+    const teamSlots = teamsData[destinationTeamIdx][quickRole];
     const emptyIndex = teamSlots.findIndex(s => !s.name || s.name.trim() === '');
 
     if (emptyIndex === -1) {
-      alert(`Attenzione: ${teamNames[actualTeamIdx]} ha già completato i posti per il ruolo ${quickRole}!`);
+      alert(`Attenzione: ${teamNames[destinationTeamIdx]} ha già completato i posti per il ruolo ${quickRole}!`);
       return;
     }
 
     const finalPrice = quickPrice === '' ? 1 : Math.max(1, parseInt(quickPrice, 10) || 1);
-    const updatedTeam = { ...teamsData[actualTeamIdx] };
+    const updatedTeam = { ...teamsData[destinationTeamIdx] };
     const updatedRole = [...updatedTeam[quickRole]];
     updatedRole[emptyIndex] = {
       name: quickName.trim(),
@@ -305,7 +306,7 @@ export default function App() {
     };
     updatedTeam[quickRole] = updatedRole;
 
-    const nextTeams = { ...teamsData, [actualTeamIdx]: updatedTeam };
+    const nextTeams = { ...teamsData, [destinationTeamIdx]: updatedTeam };
     const nextHist = [...history.slice(-20), JSON.stringify(teamsData)];
 
     await pushStateToSupabase(nextTeams, nextHist);
@@ -440,7 +441,7 @@ export default function App() {
     );
   }
 
-  // TABELLONE ASTA IN DIRETTA
+  // TABELLONE LIVE
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* 1. Header Principale Fissa */}
@@ -452,24 +453,19 @@ export default function App() {
               <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost && '(GESTORE)'}</span>
             </div>
 
-            {/* Selettore Squadra: Per Ospite è la propria, per il Gestore è facoltativo */}
-            {!isHost ? (
+            {/* Selettore della propria squadra per Ospite */}
+            {!isHost && (
               <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
                 <span className="text-slate-400 font-bold">La tua squadra:</span>
                 <select
-                  value={myTeamIndex === null ? '' : myTeamIndex}
-                  onChange={(e) => setMyTeamIndex(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                  value={myTeamIndex}
+                  onChange={(e) => setMyTeamIndex(parseInt(e.target.value, 10))}
                   className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
                 >
-                  <option value="">-- Seleziona la tua squadra --</option>
                   {Array.from({ length: teamCount }).map((_, idx) => (
                     <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
                   ))}
                 </select>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300">
-                <ShieldCheck className="w-3.5 h-3.5" /> Accesso Totale Gestore
               </div>
             )}
 
@@ -523,27 +519,27 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. Barra Assegnazione Rapida */}
+      {/* 2. Barra Assegnazione Rapida con Dropdown Squadra Sempre Attivo */}
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
             <PlusCircle className="w-4 h-4" /> Assegna a:
           </span>
 
-          {/* Selezione squadra: Visibile sempre per il Gestore, fissa per l'ospite */}
+          {/* Menu a tendina per scegliere la squadra di destinazione */}
           {isHost ? (
             <select
-              value={targetTeamIndex}
-              onChange={e => setTargetTeamIndex(parseInt(e.target.value, 10))}
-              className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-emerald-300 outline-none cursor-pointer"
+              value={selectedTargetTeam}
+              onChange={e => setSelectedTargetTeam(parseInt(e.target.value, 10))}
+              className="bg-emerald-950 border border-emerald-500 text-emerald-300 font-extrabold rounded px-3 py-1.5 text-sm outline-none cursor-pointer shadow"
             >
               {Array.from({ length: teamCount }).map((_, idx) => (
                 <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
               ))}
             </select>
           ) : (
-            <span className="text-sm font-bold text-white bg-slate-950 px-2 py-1 rounded border border-slate-700">
-              {myTeamIndex !== null ? teamNames[myTeamIndex] : 'Nessuna squadra'}
+            <span className="text-sm font-extrabold text-emerald-300 bg-slate-950 px-3 py-1.5 rounded border border-slate-700">
+              {teamNames[myTeamIndex] || `Squadra ${myTeamIndex + 1}`}
             </span>
           )}
 
@@ -551,12 +547,11 @@ export default function App() {
             <input
               type="text"
               required
-              disabled={!isHost && myTeamIndex === null}
-              placeholder={!isHost && myTeamIndex === null ? "⚠️ Seleziona prima la tua squadra in alto!" : "Digita nome giocatore (es. Lautaro, Dimarco)..."}
+              placeholder="Digita nome giocatore (es. Lautaro, Dimarco)..."
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-3 py-1.5 text-base text-white placeholder-slate-500 outline-none disabled:opacity-50"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-3 py-1.5 text-base text-white placeholder-slate-500 outline-none"
             />
 
             {showSuggestions && suggestions.length > 0 && (
@@ -590,9 +585,8 @@ export default function App() {
 
           <select
             value={quickRole}
-            disabled={!isHost && myTeamIndex === null}
             onChange={e => setQuickRole(e.target.value)}
-            className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-white outline-none cursor-pointer disabled:opacity-50"
+            className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-white outline-none cursor-pointer"
           >
             <option value="P">P (Portiere)</option>
             <option value="D">D (Difensore)</option>
@@ -605,17 +599,15 @@ export default function App() {
             min="1"
             max={totalBudget}
             required
-            disabled={!isHost && myTeamIndex === null}
             placeholder="Prezzo"
             value={quickPrice}
             onChange={e => setQuickPrice(e.target.value)}
-            className="w-24 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-base font-bold text-amber-300 text-center outline-none disabled:opacity-50"
+            className="w-24 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-base font-bold text-amber-300 text-center outline-none"
           />
 
           <button
             type="submit"
-            disabled={!isHost && myTeamIndex === null}
-            className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-sm font-bold rounded shadow transition cursor-pointer"
+            className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded shadow transition cursor-pointer"
           >
             Conferma Acquisto
           </button>
@@ -628,7 +620,6 @@ export default function App() {
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
             const stats = getTeamStats(teamIdx);
             const isMyTeam = myTeamIndex === teamIdx;
-            // Il Gestore ha sempre il permesso di modifica; l'ospite solo sulla propria squadra
             const canEditThisColumn = isHost || isMyTeam;
 
             return (
@@ -683,8 +674,6 @@ export default function App() {
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
                     const isRoleLocked = lockedRoles[roleKey];
-                    
-                    // Il Gestore può sempre modificare; l'ospite può modificare solo la sua colonna e solo se non è lockato
                     const canEditSlot = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
