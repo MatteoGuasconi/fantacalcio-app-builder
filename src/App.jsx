@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, ShieldCheck, Share2 } from 'lucide-react';
+import { supabase } from './supabaseClient';
 import { OFFICIAL_PLAYERS_DB } from './playersData';
 
 const ROLES_CONFIG = [
@@ -10,35 +11,18 @@ const ROLES_CONFIG = [
 ];
 
 export default function App() {
-  const [totalBudget, setTotalBudget] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_builder_budget') || '500', 10);
-  });
+  const [roomId, setRoomId] = useState('');
+  const [isHost, setIsHost] = useState(false);
+  const [myTeamIndex, setMyTeamIndex] = useState(null);
+  const [inLobby, setInLobby] = useState(true);
 
-  const [hasDefMod, setHasDefMod] = useState(() => {
-    return localStorage.getItem('fanta_builder_mod_def') !== 'false';
-  });
-
-  const [hasTeamMod, setHasTeamMod] = useState(() => {
-    return localStorage.getItem('fanta_builder_mod_team') !== 'false';
-  });
-
-  const [teamCount, setTeamCount] = useState(() => {
-    return parseInt(localStorage.getItem('fanta_builder_team_count') || '8', 10);
-  });
-
-  const [teamNames, setTeamNames] = useState(() => {
-    const saved = localStorage.getItem('fanta_builder_team_names');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
-    }
-    return Array.from({ length: 14 }, (_, i) => `Squadra ${i + 1}`);
-  });
-
+  // Dati stanza
+  const [totalBudget, setTotalBudget] = useState(500);
+  const [hasDefMod, setHasDefMod] = useState(true);
+  const [hasTeamMod, setHasTeamMod] = useState(true);
+  const [teamCount, setTeamCount] = useState(8);
+  const [teamNames, setTeamNames] = useState(Array.from({ length: 8 }, (_, i) => `Squadra ${i + 1}`));
   const [teamsData, setTeamsData] = useState(() => {
-    const saved = localStorage.getItem('fanta_builder_teams_data');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
-    }
     const initial = {};
     for (let i = 0; i < 14; i++) {
       initial[i] = {
@@ -54,22 +38,61 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [quickName, setQuickName] = useState('');
   const [quickRole, setQuickRole] = useState('P');
-  const [quickTeamIndex, setQuickTeamIndex] = useState(0);
   const [quickPrice, setQuickPrice] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedReport, setCopiedReport] = useState(false);
+
+  const [joinRoomInput, setJoinRoomInput] = useState('');
+  const [newRoomName, setNewRoomName] = useState('');
 
   const suggestionRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem('fanta_builder_budget', totalBudget.toString());
-    localStorage.setItem('fanta_builder_mod_def', hasDefMod.toString());
-    localStorage.setItem('fanta_builder_mod_team', hasTeamMod.toString());
-    localStorage.setItem('fanta_builder_team_count', teamCount.toString());
-    localStorage.setItem('fanta_builder_team_names', JSON.stringify(teamNames));
-    localStorage.setItem('fanta_builder_teams_data', JSON.stringify(teamsData));
-  }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData]);
+    const params = new URLSearchParams(window.location.search);
+    const rId = params.get('room');
+    if (rId) {
+      setJoinRoomInput(rId.toUpperCase());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    const fetchRoom = async () => {
+      const { data, error } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+      if (data) {
+        setTotalBudget(data.budget);
+        setHasDefMod(data.has_def_mod);
+        setHasTeamMod(data.has_team_mod);
+        setTeamCount(data.team_count);
+        setTeamNames(data.team_names);
+        setTeamsData(data.teams_data);
+        setHistory(data.history || []);
+      }
+    };
+    fetchRoom();
+
+    const channel = supabase
+      .channel(`room_${roomId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, (payload) => {
+        const updated = payload.new;
+        setTotalBudget(updated.budget);
+        setHasDefMod(updated.has_def_mod);
+        setHasTeamMod(updated.has_team_mod);
+        setTeamCount(updated.team_count);
+        setTeamNames(updated.team_names);
+        setTeamsData(updated.teams_data);
+        setHistory(updated.history || []);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -81,16 +104,82 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const saveHistoryState = (nextData) => {
-    setHistory(prev => [...prev.slice(-20), JSON.stringify(teamsData)]);
-    setTeamsData(nextData);
+  const pushStateToSupabase = async (newTeamsData, newHistory, overrides = {}) => {
+    setTeamsData(newTeamsData);
+    if (newHistory) setHistory(newHistory);
+
+    await supabase.from('rooms').update({
+      teams_data: newTeamsData,
+      history: newHistory || history,
+      budget: overrides.budget !== undefined ? overrides.budget : totalBudget,
+      has_def_mod: overrides.hasDefMod !== undefined ? overrides.hasDefMod : hasDefMod,
+      has_team_mod: overrides.hasTeamMod !== undefined ? overrides.hasTeamMod : hasTeamMod,
+      team_count: overrides.teamCount !== undefined ? overrides.teamCount : teamCount,
+      team_names: overrides.teamNames !== undefined ? overrides.teamNames : teamNames,
+      ...overrides
+    }).eq('id', roomId);
   };
 
-  const handleUndo = () => {
-    if (history.length === 0) return;
-    const lastState = history[history.length - 1];
-    setHistory(prev => prev.slice(0, prev.length - 1));
-    setTeamsData(JSON.parse(lastState));
+  const handleCreateRoom = async (e) => {
+    e.preventDefault();
+    const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
+    
+    const initialNames = Array.from({ length: 8 }, (_, i) => `Squadra ${i + 1}`);
+    const initialData = {};
+    for (let i = 0; i < 14; i++) {
+      initialData[i] = {
+        P: Array(3).fill({ name: '', price: '' }),
+        D: Array(8).fill({ name: '', price: '' }),
+        C: Array(8).fill({ name: '', price: '' }),
+        A: Array(6).fill({ name: '', price: '' })
+      };
+    }
+
+    const { error } = await supabase.from('rooms').upsert({
+      id: code,
+      budget: 500,
+      has_def_mod: true,
+      has_team_mod: true,
+      team_count: 8,
+      team_names: initialNames,
+      teams_data: initialData,
+      history: []
+    });
+
+    if (error) {
+      alert("Errore nella creazione della stanza. Controlla il collegamento Supabase.");
+      return;
+    }
+
+    setRoomId(code);
+    setIsHost(true);
+    setMyTeamIndex(0);
+    setInLobby(false);
+    window.history.pushState({}, '', `?room=${code}`);
+  };
+
+  const handleJoinRoom = async (e) => {
+    e.preventDefault();
+    const code = joinRoomInput.trim().toUpperCase();
+    if (!code) return;
+
+    const { data, error } = await supabase.from('rooms').select('*').eq('id', code).single();
+    if (error || !data) {
+      alert("Stanza non trovata! Verifica il codice o il link.");
+      return;
+    }
+
+    setRoomId(code);
+    setIsHost(false);
+    setTotalBudget(data.budget);
+    setHasDefMod(data.has_def_mod);
+    setHasTeamMod(data.has_team_mod);
+    setTeamCount(data.team_count);
+    setTeamNames(data.team_names);
+    setTeamsData(data.teams_data);
+    setHistory(data.history || []);
+    setInLobby(false);
+    window.history.pushState({}, '', `?room=${code}`);
   };
 
   const handleNameSearchChange = (value) => {
@@ -118,7 +207,16 @@ export default function App() {
     setShowSuggestions(false);
   };
 
-  const handleCellChange = (teamIdx, role, index, field, value) => {
+  const handleUndo = async () => {
+    if (history.length === 0) return;
+    const lastState = history[history.length - 1];
+    const newHistory = history.slice(0, history.length - 1);
+    await pushStateToSupabase(JSON.parse(lastState), newHistory);
+  };
+
+  const handleCellChange = async (teamIdx, role, index, field, value) => {
+    if (!isHost && myTeamIndex !== teamIdx) return;
+
     const updatedTeam = { ...teamsData[teamIdx] };
     const updatedRoleList = [...updatedTeam[role]];
     let parsedVal = value;
@@ -127,31 +225,43 @@ export default function App() {
     }
     updatedRoleList[index] = { ...updatedRoleList[index], [field]: parsedVal };
     updatedTeam[role] = updatedRoleList;
-    saveHistoryState({ ...teamsData, [teamIdx]: updatedTeam });
+
+    const nextTeams = { ...teamsData, [teamIdx]: updatedTeam };
+    const nextHist = [...history.slice(-20), JSON.stringify(teamsData)];
+    await pushStateToSupabase(nextTeams, nextHist);
   };
 
-  const handleClearSlot = (teamIdx, role, index) => {
+  const handleClearSlot = async (teamIdx, role, index) => {
+    if (!isHost && myTeamIndex !== teamIdx) return;
+
     const updatedTeam = { ...teamsData[teamIdx] };
     const updatedRoleList = [...updatedTeam[role]];
     updatedRoleList[index] = { name: '', price: '' };
     updatedTeam[role] = updatedRoleList;
-    saveHistoryState({ ...teamsData, [teamIdx]: updatedTeam });
+
+    const nextTeams = { ...teamsData, [teamIdx]: updatedTeam };
+    const nextHist = [...history.slice(-20), JSON.stringify(teamsData)];
+    await pushStateToSupabase(nextTeams, nextHist);
   };
 
-  const handleQuickAssign = (e) => {
+  const handleQuickAssign = async (e) => {
     e.preventDefault();
     if (!quickName.trim()) return;
+    if (myTeamIndex === null) {
+      alert("Seleziona prima la tua squadra in alto!");
+      return;
+    }
 
-    const teamSlots = teamsData[quickTeamIndex][quickRole];
+    const teamSlots = teamsData[myTeamIndex][quickRole];
     const emptyIndex = teamSlots.findIndex(s => !s.name || s.name.trim() === '');
 
     if (emptyIndex === -1) {
-      alert(`Attenzione: ${teamNames[quickTeamIndex]} ha già completato i posti per il ruolo ${quickRole}!`);
+      alert(`Attenzione: ${teamNames[myTeamIndex]} ha già completato i posti per il ruolo ${quickRole}!`);
       return;
     }
 
     const finalPrice = quickPrice === '' ? 1 : Math.max(1, parseInt(quickPrice, 10) || 1);
-    const updatedTeam = { ...teamsData[quickTeamIndex] };
+    const updatedTeam = { ...teamsData[myTeamIndex] };
     const updatedRole = [...updatedTeam[quickRole]];
     updatedRole[emptyIndex] = {
       name: quickName.trim(),
@@ -159,7 +269,10 @@ export default function App() {
     };
     updatedTeam[quickRole] = updatedRole;
 
-    saveHistoryState({ ...teamsData, [quickTeamIndex]: updatedTeam });
+    const nextTeams = { ...teamsData, [myTeamIndex]: updatedTeam };
+    const nextHist = [...history.slice(-20), JSON.stringify(teamsData)];
+
+    await pushStateToSupabase(nextTeams, nextHist);
     setQuickName('');
     setQuickPrice('');
     setShowSuggestions(false);
@@ -200,63 +313,190 @@ export default function App() {
     }
   };
 
+  const handleCopyInviteLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleCopyReport = () => {
+    let report = `🏆 RESOCONTO ASTA FANTACALCIO (Stanza: ${roomId})\n`;
+    report += `Budget: ${totalBudget} | Mod. Difesa: ${hasDefMod ? 'SI' : 'NO'} | Mod. Squadra: ${hasTeamMod ? 'SI' : 'NO'}\n\n`;
+
+    for (let i = 0; i < teamCount; i++) {
+      const tName = teamNames[i] || `Squadra ${i + 1}`;
+      const stats = getTeamStats(i);
+      report += `==============================\n`;
+      report += `SQUADRA: ${tName.toUpperCase()} (Spesi: ${stats.totalSpent}/${totalBudget} - Residui: ${stats.remainingBudget})\n`;
+      report += `------------------------------\n`;
+      ['P', 'D', 'C', 'A'].forEach(rKey => {
+        const rName = rKey === 'P' ? 'Portieri' : rKey === 'D' ? 'Difensori' : rKey === 'C' ? 'Centrocampisti' : 'Attaccanti';
+        report += `[${rName}]\n`;
+        teamsData[i][rKey].forEach((slot, idx) => {
+          if (slot.name) {
+            report += `  ${idx + 1}. ${slot.name} (${slot.price || 1} crediti)\n`;
+          }
+        });
+      });
+      report += `\n`;
+    }
+
+    navigator.clipboard.writeText(report);
+    setCopiedReport(true);
+    setTimeout(() => setCopiedReport(false), 3000);
+  };
+
+  // SCHERMATA LOBBY (SCELTA GESTORE / OSPITE)
+  if (inLobby) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
+          <div className="text-center space-y-1">
+            <h1 className="text-2xl font-black text-white tracking-wide">ASTA FANTACALCIO LIVE</h1>
+            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale per tutti i partecipanti</p>
+          </div>
+
+          <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
+              <ShieldCheck className="w-4 h-4" /> SEI IL GESTORE DELL'ASTA?
+            </div>
+            <form onSubmit={handleCreateRoom} className="space-y-2">
+              <input
+                type="text"
+                placeholder="Nome/Codice Stanza (es. MIKAELONA)"
+                value={newRoomName}
+                onChange={e => setNewRoomName(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 uppercase"
+              />
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
+              >
+                Crea Nuova Stanza Lega
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/30 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-indigo-400">
+              <Users className="w-4 h-4" /> SEI UN PARTECIPANTE (OSPITE)?
+            </div>
+            <form onSubmit={handleJoinRoom} className="space-y-2">
+              <input
+                type="text"
+                required
+                placeholder="Incolla Codice Stanza (es. MIKAELONA)"
+                value={joinRoomInput}
+                onChange={e => setJoinRoomInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 uppercase"
+              />
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
+              >
+                Entra nell'Asta
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // TABELLONE ASTA IN DIRETTA
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* Header Fissa in Cima */}
+      {/* 1. Header Principale Fissa */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-black tracking-wide text-white">ASTA FANTACALCIO 2026-2027</h1>
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
-              <span>Budget: <strong className="text-emerald-400">{totalBudget} crediti</strong></span>
+            <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-lg">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-black text-emerald-300">LIVE: {roomId}</span>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
+              <span className="text-slate-400 font-bold">La tua squadra:</span>
+              <select
+                value={myTeamIndex === null ? '' : myTeamIndex}
+                onChange={(e) => setMyTeamIndex(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
+              >
+                <option value="">-- Seleziona squadra --</option>
+                {Array.from({ length: teamCount }).map((_, idx) => (
+                  <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
+              <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
               <span>•</span>
               <span>Mod. Difesa: {hasDefMod ? '✅' : '❌'}</span>
               <span>•</span>
               <span>Mod. Squadra: {hasTeamMod ? '✅' : '❌'}</span>
-              <span>•</span>
-              <span>Squadre: <strong className="text-emerald-400">{teamCount}</strong></span>
-              <span>•</span>
-              <span>Listone: <strong className="text-indigo-400">{OFFICIAL_PLAYERS_DB.length} giocatori</strong></span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {history.length > 0 && (
-              <button
-                type="button"
-                onClick={handleUndo}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded shadow transition"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Annulla azione
-              </button>
-            )}
+            <button
+              onClick={handleCopyInviteLink}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition cursor-pointer"
+            >
+              {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+              {copiedLink ? 'Link Copiato!' : 'Invita Partecipanti'}
+            </button>
 
             <button
-              onClick={() => setIsConfigOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded shadow transition"
+              onClick={handleCopyReport}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded shadow transition cursor-pointer"
             >
-              <Settings className="w-3.5 h-3.5" /> Regole & Squadre
+              {copiedReport ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedReport ? 'Report Copiato!' : 'Copia Rose per Presidente'}
             </button>
+
+            {isHost && (
+              <>
+                {history.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleUndo}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded shadow transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Annulla azione
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setIsConfigOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white rounded shadow transition cursor-pointer"
+                >
+                  <Settings className="w-3.5 h-3.5" /> Regole Lega
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Barra Assegnazione Rapida Fissa */}
+      {/* 2. Barra Assegnazione Rapida */}
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <PlusCircle className="w-4 h-4" /> Assegna:
+            <PlusCircle className="w-4 h-4" /> Assegna a {myTeamIndex !== null ? <strong className="text-white underline">{teamNames[myTeamIndex]}</strong> : 'tua squadra'}:
           </span>
 
           <div className="flex-1 min-w-[260px] relative" ref={suggestionRef}>
             <input
               type="text"
               required
-              placeholder="Digita nome giocatore (es. Lautaro, Dimarco)..."
+              disabled={myTeamIndex === null}
+              placeholder={myTeamIndex === null ? "⚠️ Seleziona prima la tua squadra in alto!" : "Digita nome giocatore (es. Lautaro, Dimarco)..."}
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-3 py-1.5 text-base text-white placeholder-slate-500 outline-none"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-3 py-1.5 text-base text-white placeholder-slate-500 outline-none disabled:opacity-50"
             />
 
             {showSuggestions && suggestions.length > 0 && (
@@ -290,8 +530,9 @@ export default function App() {
 
           <select
             value={quickRole}
+            disabled={myTeamIndex === null}
             onChange={e => setQuickRole(e.target.value)}
-            className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-white outline-none cursor-pointer"
+            className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-white outline-none cursor-pointer disabled:opacity-50"
           >
             <option value="P">P (Portiere)</option>
             <option value="D">D (Difensore)</option>
@@ -299,59 +540,74 @@ export default function App() {
             <option value="A">A (Attaccante)</option>
           </select>
 
-          <select
-            value={quickTeamIndex}
-            onChange={e => setQuickTeamIndex(parseInt(e.target.value, 10))}
-            className="bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-sm font-bold text-emerald-300 outline-none cursor-pointer"
-          >
-            {Array.from({ length: teamCount }).map((_, idx) => (
-              <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
-            ))}
-          </select>
-
           <input
             type="number"
             min="1"
             max={totalBudget}
             required
+            disabled={myTeamIndex === null}
             placeholder="Prezzo"
             value={quickPrice}
             onChange={e => setQuickPrice(e.target.value)}
-            className="w-24 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-base font-bold text-amber-300 text-center outline-none"
+            className="w-24 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-2.5 py-1.5 text-base font-bold text-amber-300 text-center outline-none disabled:opacity-50"
           />
 
           <button
             type="submit"
-            className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded shadow transition"
+            disabled={myTeamIndex === null}
+            className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-sm font-bold rounded shadow transition cursor-pointer"
           >
-            Invia alla Squadra
+            Conferma Acquisto
           </button>
         </form>
       </div>
 
-      {/* Tabellone con Nomi e Totali Fissi e Scorrimento Giocatori al Centro */}
+      {/* 3. Tabellone con Nomi e Totali Fissi e Scorrimento Giocatori */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
             const stats = getTeamStats(teamIdx);
+            const isMyTeam = myTeamIndex === teamIdx;
+            const canEditThisColumn = isHost || isMyTeam;
 
             return (
-              <div key={teamIdx} className="w-[280px] flex-shrink-0 flex flex-col bg-slate-900 border border-slate-800 rounded-lg overflow-hidden shadow h-full">
-                {/* Intestazione Squadra Editabile Fissa */}
-                <div className="flex-shrink-0 bg-slate-800 p-2 border-b border-slate-700 text-center shadow">
-                  <input
-                    type="text"
-                    value={teamNames[teamIdx]}
-                    onChange={(e) => {
-                      const updated = [...teamNames];
-                      updated[teamIdx] = e.target.value;
-                      setTeamNames(updated);
-                    }}
-                    placeholder={`Squadra ${teamIdx + 1}`}
-                    className="w-full bg-transparent text-center font-extrabold text-base text-emerald-300 focus:bg-slate-950 rounded px-1.5 py-0.5 outline-none border border-transparent focus:border-emerald-500 transition"
-                  />
+              <div
+                key={teamIdx}
+                className={`w-[280px] flex-shrink-0 flex flex-col bg-slate-900 border rounded-lg overflow-hidden shadow h-full transition-all ${
+                  isMyTeam ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-800'
+                }`}
+              >
+                {/* Intestazione Squadra */}
+                <div className={`flex-shrink-0 p-2 border-b text-center shadow ${isMyTeam ? 'bg-slate-800 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700'}`}>
+                  <div className="flex items-center justify-between px-1">
+                    {isHost ? (
+                      <input
+                        type="text"
+                        value={teamNames[teamIdx]}
+                        onChange={(e) => {
+                          const updated = [...teamNames];
+                          updated[teamIdx] = e.target.value;
+                          setTeamNames(updated);
+                          pushStateToSupabase(teamsData, history, { teamNames: updated });
+                        }}
+                        placeholder={`Squadra ${teamIdx + 1}`}
+                        className="w-full bg-transparent text-center font-extrabold text-base text-emerald-300 focus:bg-slate-950 rounded px-1.5 py-0.5 outline-none border border-transparent focus:border-emerald-500 transition"
+                      />
+                    ) : (
+                      <h3 className="font-extrabold text-base text-emerald-300 truncate w-full text-center">
+                        {teamNames[teamIdx] || `Squadra ${teamIdx + 1}`}
+                      </h3>
+                    )}
+                  </div>
+
                   <div className="flex justify-between items-center text-xs mt-1 px-1 text-slate-300">
-                    <span>Budget:</span>
+                    <span className="flex items-center gap-1">
+                      {isMyTeam ? (
+                        <span className="text-emerald-400 font-bold">● La tua squadra</span>
+                      ) : (
+                        <span className="text-slate-500 flex items-center gap-0.5"><Lock className="w-3 h-3" /> Sola lettura</span>
+                      )}
+                    </span>
                     <span className="font-black text-white bg-slate-700 px-2 py-0.5 rounded">{totalBudget}</span>
                   </div>
                 </div>
@@ -381,21 +637,27 @@ export default function App() {
                             <div key={idx} className="flex items-center gap-1">
                               <input
                                 type="text"
+                                disabled={!canEditThisColumn}
                                 placeholder={`${roleKey}${idx + 1}`}
                                 value={slot.name}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
-                                className="flex-1 min-w-0 bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded px-2 py-1 text-[15px] font-semibold text-white focus:outline-none whitespace-nowrap overflow-x-auto"
+                                className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white focus:outline-none whitespace-nowrap overflow-x-auto ${
+                                  canEditThisColumn ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-300 cursor-not-allowed'
+                                }`}
                               />
                               <input
                                 type="number"
                                 min="0"
                                 max={totalBudget}
+                                disabled={!canEditThisColumn}
                                 placeholder="€"
                                 value={slot.price}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
-                                className="w-14 flex-shrink-0 bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded px-1 py-1 text-[15px] font-black text-center text-amber-400 focus:outline-none"
+                                className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center text-amber-400 focus:outline-none ${
+                                  canEditThisColumn ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/80 cursor-not-allowed'
+                                }`}
                               />
-                              {slot.name ? (
+                              {canEditThisColumn && slot.name ? (
                                 <button
                                   type="button"
                                   onClick={() => handleClearSlot(teamIdx, roleKey, idx)}
@@ -441,13 +703,13 @@ export default function App() {
         </div>
       </main>
 
-      {/* Finestra Modale Impostazioni Regole */}
-      {isConfigOpen && (
+      {/* Finestra Modale Impostazioni */}
+      {isConfigOpen && isHost && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 shadow-2xl">
             <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Settings className="w-5 h-5 text-emerald-400" /> Configura Regole Lega
+                <Settings className="w-5 h-5 text-emerald-400" /> Configura Regole Lega (Stanza: {roomId})
               </h3>
               <button onClick={() => setIsConfigOpen(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
             </div>
@@ -461,7 +723,11 @@ export default function App() {
                   max="5000"
                   step="50"
                   value={totalBudget}
-                  onChange={(e) => setTotalBudget(Math.max(100, parseInt(e.target.value, 10) || 500))}
+                  onChange={(e) => {
+                    const val = Math.max(100, parseInt(e.target.value, 10) || 500);
+                    setTotalBudget(val);
+                    pushStateToSupabase(teamsData, history, { budget: val });
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-amber-300 outline-none focus:border-emerald-500"
                 />
               </div>
@@ -470,7 +736,11 @@ export default function App() {
                 <label className="block text-xs font-bold text-slate-300 mb-1">Numero di Squadre Partecipanti:</label>
                 <select
                   value={teamCount}
-                  onChange={(e) => setTeamCount(parseInt(e.target.value, 10))}
+                  onChange={(e) => {
+                    const count = parseInt(e.target.value, 10);
+                    setTeamCount(count);
+                    pushStateToSupabase(teamsData, history, { teamCount: count });
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-white outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   {[4, 6, 8, 10, 12, 14].map(num => (
@@ -484,7 +754,11 @@ export default function App() {
                   <label className="block text-xs font-bold text-slate-300 mb-1">Modificatore Difesa:</label>
                   <select
                     value={hasDefMod ? "SI" : "NO"}
-                    onChange={(e) => setHasDefMod(e.target.value === "SI")}
+                    onChange={(e) => {
+                      const mod = e.target.value === "SI";
+                      setHasDefMod(mod);
+                      pushStateToSupabase(teamsData, history, { hasDefMod: mod });
+                    }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none"
                   >
                     <option value="SI">Attivo ✅</option>
@@ -496,7 +770,11 @@ export default function App() {
                   <label className="block text-xs font-bold text-slate-300 mb-1">Modificatore Squadra:</label>
                   <select
                     value={hasTeamMod ? "SI" : "NO"}
-                    onChange={(e) => setHasTeamMod(e.target.value === "SI")}
+                    onChange={(e) => {
+                      const mod = e.target.value === "SI";
+                      setHasTeamMod(mod);
+                      pushStateToSupabase(teamsData, history, { hasTeamMod: mod });
+                    }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none"
                   >
                     <option value="SI">Attivo ✅</option>
@@ -509,7 +787,7 @@ export default function App() {
                 onClick={() => setIsConfigOpen(false)}
                 className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition shadow"
               >
-                Salva Regole
+                Salva e Chiudi
               </button>
             </div>
           </div>
