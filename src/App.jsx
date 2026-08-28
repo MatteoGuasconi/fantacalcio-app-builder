@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, Unlock, ShieldCheck, Share2, LogOut } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, Unlock, ShieldCheck, Share2, LogOut, KeyRound } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import { OFFICIAL_PLAYERS_DB } from './playersData';
 
@@ -13,6 +13,7 @@ const ROLES_CONFIG = [
 export default function App() {
   const [roomId, setRoomId] = useState('');
   const [isHost, setIsHost] = useState(false);
+  const [hostPin, setHostPin] = useState('');
   const [myTeamIndex, setMyTeamIndex] = useState(0);
   const [selectedTargetTeam, setSelectedTargetTeam] = useState(0);
   const [inLobby, setInLobby] = useState(true);
@@ -44,16 +45,19 @@ export default function App() {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [enteredPin, setEnteredPin] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedReport, setCopiedReport] = useState(false);
 
   const [joinRoomInput, setJoinRoomInput] = useState('');
   const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomPin, setNewRoomPin] = useState('');
   const [isGuestJoining, setIsGuestJoining] = useState(false);
 
   const suggestionRef = useRef(null);
 
-  // Rileva se si entra tramite link di invito
+  // Rileva link d'invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -62,7 +66,6 @@ export default function App() {
       setJoinRoomInput(code);
       setRoomId(code);
       setIsGuestJoining(true);
-      // Carica i dati della stanza per mostrare l'elenco squadre
       const loadInitialRoom = async () => {
         const { data } = await supabase.from('rooms').select('*').eq('id', code).single();
         if (data) {
@@ -73,6 +76,7 @@ export default function App() {
           setTeamNames(data.team_names);
           setTeamsData(data.teams_data);
           setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
+          setHostPin(data.host_pin || '1234');
           setHistory(data.history || []);
         }
       };
@@ -80,7 +84,7 @@ export default function App() {
     }
   }, []);
 
-  // Realtime Supabase
+  // Supabase Realtime
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -95,6 +99,7 @@ export default function App() {
         setTeamNames(updated.team_names);
         setTeamsData(updated.teams_data);
         setLockedRoles(updated.locked_roles || { P: false, D: false, C: false, A: false });
+        setHostPin(updated.host_pin || '1234');
         setHistory(updated.history || []);
       })
       .subscribe();
@@ -131,10 +136,11 @@ export default function App() {
     }).eq('id', roomId);
   };
 
-  // Creazione Stanza (Gestore)
+  // Creazione Stanza con PIN
   const handleCreateRoom = async (e) => {
     e.preventDefault();
     const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
+    const pin = newRoomPin.trim() || '1234';
     
     const initialNames = Array.from({ length: 8 }, (_, i) => `Squadra ${i + 1}`);
     const initialData = {};
@@ -156,6 +162,7 @@ export default function App() {
       team_names: initialNames,
       teams_data: initialData,
       locked_roles: { P: false, D: false, C: false, A: false },
+      host_pin: pin,
       history: []
     });
 
@@ -165,6 +172,7 @@ export default function App() {
     }
 
     setRoomId(code);
+    setHostPin(pin);
     setIsHost(true);
     setMyTeamIndex(0);
     setSelectedTargetTeam(0);
@@ -172,14 +180,12 @@ export default function App() {
     window.history.pushState({}, '', `?room=${code}`);
   };
 
-  // Entrata come Ospite selezionando la propria squadra
   const handleEnterAsGuest = (teamIdx) => {
     setMyTeamIndex(teamIdx);
     setIsHost(false);
     setInLobby(false);
   };
 
-  // Entrata manuale da codice
   const handleCheckRoomCode = async (e) => {
     e.preventDefault();
     const code = joinRoomInput.trim().toUpperCase();
@@ -199,8 +205,21 @@ export default function App() {
     setTeamNames(data.team_names);
     setTeamsData(data.teams_data);
     setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
+    setHostPin(data.host_pin || '1234');
     setHistory(data.history || []);
     setIsGuestJoining(true);
+  };
+
+  const handleVerifyHostPin = (e) => {
+    e.preventDefault();
+    if (enteredPin === hostPin) {
+      setIsHost(true);
+      setIsPinModalOpen(false);
+      setEnteredPin('');
+      alert("Accesso Gestore confermato con successo!");
+    } else {
+      alert("PIN errato! Accesso Gestore negato.");
+    }
   };
 
   const handleToggleLockRole = async (roleKey) => {
@@ -236,17 +255,21 @@ export default function App() {
   };
 
   const handleUndo = async () => {
-    if (history.length === 0) return;
+    if (!isHost || history.length === 0) return;
     const lastState = history[history.length - 1];
     const newHistory = history.slice(0, history.length - 1);
     await pushStateToSupabase(JSON.parse(lastState), newHistory);
   };
 
   const handleCellChange = async (teamIdx, role, index, field, value) => {
+    // Controllo antifrode rigido
     if (!isHost) {
-      if (myTeamIndex !== teamIdx) return;
+      if (myTeamIndex !== teamIdx) {
+        alert("Non puoi modificare le squadre degli altri partecipanti!");
+        return;
+      }
       if (lockedRoles[role]) {
-        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore!`);
+        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore! Modifica non consentita.`);
         return;
       }
     }
@@ -269,7 +292,7 @@ export default function App() {
     if (!isHost) {
       if (myTeamIndex !== teamIdx) return;
       if (lockedRoles[role]) {
-        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore!`);
+        alert(`Il reparto ${role} è bloccato dal Gestore!`);
         return;
       }
     }
@@ -291,7 +314,7 @@ export default function App() {
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && lockedRoles[quickRole]) {
-      alert(`Il reparto selezionato (${quickRole}) è bloccato e convalidato dal Gestore!`);
+      alert(`Il reparto ${quickRole} è bloccato dal Gestore! Impossibile assegnare nuovi acquisti.`);
       return;
     }
 
@@ -390,23 +413,23 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // SCHERMATA DI SELEZIONE SQUADRA / LOBBY
+  // LOBBY INIZIALE
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-black text-white tracking-wide">ASTA FANTACALCIO LIVE</h1>
-            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale per tutti i partecipanti</p>
+            <p className="text-xs text-slate-400">Protezione antifrode e sincronizzazione in tempo reale</p>
           </div>
 
-          {/* Se si entra tramite link d'invito o dopo aver inserito il codice */}
+          {/* Accesso tramite link d'invito */}
           {isGuestJoining ? (
             <div className="space-y-4">
               <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/40 text-center space-y-2">
-                <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">Stanza Rilevata</span>
+                <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">Stanza Lega Rilevata</span>
                 <h2 className="text-2xl font-black text-white">{roomId}</h2>
-                <p className="text-xs text-slate-400">Seleziona quale squadra gestirai durante l'asta:</p>
+                <p className="text-xs text-slate-400">Clicca sulla tua squadra per entrare all'asta:</p>
               </div>
 
               <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -418,7 +441,7 @@ export default function App() {
                     className="w-full py-2.5 px-4 bg-slate-950 hover:bg-indigo-600 border border-slate-800 hover:border-indigo-400 rounded-xl text-sm font-black text-white flex justify-between items-center transition shadow cursor-pointer group"
                   >
                     <span>{teamNames[idx] || `Squadra ${idx + 1}`}</span>
-                    <span className="text-xs font-semibold text-slate-400 group-hover:text-white">Seleziona ➔</span>
+                    <span className="text-xs font-semibold text-slate-400 group-hover:text-white">Accedi ➔</span>
                   </button>
                 ))}
               </div>
@@ -426,14 +449,10 @@ export default function App() {
               <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-xs">
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsHost(true);
-                    setSelectedTargetTeam(0);
-                    setInLobby(false);
-                  }}
-                  className="text-emerald-400 hover:underline font-bold"
+                  onClick={() => setIsPinModalOpen(true)}
+                  className="text-emerald-400 hover:underline font-bold flex items-center gap-1"
                 >
-                  Entra come Gestore Generale
+                  <KeyRound className="w-3.5 h-3.5" /> Sblocca come Gestore (PIN)
                 </button>
 
                 <button
@@ -460,11 +479,19 @@ export default function App() {
                     onChange={e => setNewRoomName(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 uppercase"
                   />
+                  <input
+                    type="password"
+                    required
+                    placeholder="Imposta PIN Gestore (es. 1234)"
+                    value={newRoomPin}
+                    onChange={e => setNewRoomPin(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                  />
                   <button
                     type="submit"
                     className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
                   >
-                    Crea Nuova Stanza Lega
+                    Crea Nuova Stanza Protetta
                   </button>
                 </form>
               </div>
@@ -487,37 +514,74 @@ export default function App() {
                     type="submit"
                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
                   >
-                    Trova Stanza & Scegli Squadra
+                    Cerca Stanza & Scegli Squadra
                   </button>
                 </form>
               </div>
             </>
           )}
         </div>
+
+        {/* Modal Verifica PIN Gestore */}
+        {isPinModalOpen && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-emerald-400" /> Inserisci PIN Gestore
+              </h3>
+              <form onSubmit={handleVerifyHostPin} className="space-y-3">
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  placeholder="PIN Gestore"
+                  value={enteredPin}
+                  onChange={e => setEnteredPin(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-center font-bold text-white outline-none focus:border-emerald-500"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
+                  >
+                    Verifica
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPinModalOpen(false)}
+                    className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // TABELLONE LIVE
+  // TABELLONE ASTA IN DIRETTA
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* 1. Header Principale Fissa */}
+      {/* 1. Header Principale */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-lg">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '(GESTORE)' : `(${teamNames[myTeamIndex]})`}</span>
+              <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '👑 (GESTORE)' : `👤 (${teamNames[myTeamIndex]})`}</span>
             </div>
 
-            {/* Menu Cambio Squadra / Ruolo */}
+            {/* Menu Squadre per Ospite o Modalità Gestore */}
             <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-              <span className="text-slate-400 font-bold">Ruolo attivo:</span>
+              <span className="text-slate-400 font-bold">La tua squadra:</span>
               <select
                 value={isHost ? 'host' : myTeamIndex}
                 onChange={(e) => {
                   if (e.target.value === 'host') {
-                    setIsHost(true);
+                    if (!isHost) setIsPinModalOpen(true);
                   } else {
                     setIsHost(false);
                     setMyTeamIndex(parseInt(e.target.value, 10));
@@ -525,12 +589,22 @@ export default function App() {
                 }}
                 className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
               >
-                <option value="host">👑 Gestore (Tutte le squadre)</option>
+                {isHost && <option value="host">👑 Gestore (Controllo Totale)</option>}
                 {Array.from({ length: teamCount }).map((_, idx) => (
                   <option key={idx} value={idx}>👤 {teamNames[idx] || `Squadra ${idx + 1}`}</option>
                 ))}
               </select>
             </div>
+
+            {!isHost && (
+              <button
+                type="button"
+                onClick={() => setIsPinModalOpen(true)}
+                className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition"
+              >
+                <KeyRound className="w-3 h-3" /> Sblocca Gestore
+              </button>
+            )}
 
             <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
               <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
@@ -566,7 +640,7 @@ export default function App() {
                     onClick={handleUndo}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded shadow transition cursor-pointer"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" /> Annulla azione
+                    <RotateCcw className="w-3.5 h-3.5" /> Annulla
                   </button>
                 )}
 
@@ -581,7 +655,7 @@ export default function App() {
 
             <button
               onClick={() => setInLobby(true)}
-              title="Torna alla Lobby"
+              title="Esci dall'Asta"
               className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded border border-slate-700 transition"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -597,7 +671,7 @@ export default function App() {
             <PlusCircle className="w-4 h-4" /> Assegna a:
           </span>
 
-          {/* Menu o badge di assegnazione */}
+          {/* Selezione squadra */}
           {isHost ? (
             <select
               value={selectedTargetTeam}
@@ -691,17 +765,16 @@ export default function App() {
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
             const stats = getTeamStats(teamIdx);
             const isMyTeam = myTeamIndex === teamIdx;
-            const canEditThisColumn = isHost || isMyTeam;
 
             return (
               <div
                 key={teamIdx}
                 className={`w-[280px] flex-shrink-0 flex flex-col bg-slate-900 border rounded-lg overflow-hidden shadow h-full transition-all ${
-                  isMyTeam ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-800'
+                  isMyTeam && !isHost ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-800'
                 }`}
               >
                 {/* Intestazione Squadra */}
-                <div className={`flex-shrink-0 p-2 border-b text-center shadow ${isMyTeam ? 'bg-slate-800 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700'}`}>
+                <div className={`flex-shrink-0 p-2 border-b text-center shadow ${isMyTeam && !isHost ? 'bg-slate-800 border-emerald-500/40' : 'bg-slate-800/80 border-slate-700'}`}>
                   <div className="flex items-center justify-between px-1">
                     {isHost ? (
                       <input
@@ -726,7 +799,7 @@ export default function App() {
                   <div className="flex justify-between items-center text-xs mt-1 px-1 text-slate-300">
                     <span className="flex items-center gap-1">
                       {isHost ? (
-                        <span className="text-emerald-400 font-bold">● Gestore (Modifica attiva)</span>
+                        <span className="text-emerald-400 font-bold">● Gestore (Accesso Totale)</span>
                       ) : isMyTeam ? (
                         <span className="text-emerald-400 font-bold">● La tua squadra</span>
                       ) : (
@@ -745,11 +818,13 @@ export default function App() {
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
                     const isRoleLocked = lockedRoles[roleKey];
+                    
+                    // Protezione Antifrode Totale
                     const canEditSlot = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
                       <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
-                        {/* Tasto Blocca Sopra al Reparto & Badge di Stato */}
+                        {/* Tasto Blocca Sopra al Reparto & Badge */}
                         <div className="flex justify-between items-center mb-1.5 px-0.5">
                           <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${roleConf.badge}`}>
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
@@ -794,7 +869,7 @@ export default function App() {
                                 value={slot.name}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
                                 className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white focus:outline-none whitespace-nowrap overflow-x-auto ${
-                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-300 cursor-not-allowed'
+                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-400 cursor-not-allowed'
                                 }`}
                               />
                               <input
@@ -805,8 +880,8 @@ export default function App() {
                                 placeholder="€"
                                 value={slot.price}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
-                                className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center text-amber-400 focus:outline-none ${
-                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/80 cursor-not-allowed'
+                                className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center focus:outline-none ${
+                                  canEditSlot ? 'bg-slate-950 border border-slate-700 text-amber-400 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/70 cursor-not-allowed'
                                 }`}
                               />
                               {canEditSlot && slot.name ? (
@@ -942,6 +1017,43 @@ export default function App() {
                 Salva e Chiudi
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Verifica PIN per passare a Gestore ad asta in corso */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-emerald-400" /> Sblocca Privilegi Gestore
+            </h3>
+            <form onSubmit={handleVerifyHostPin} className="space-y-3">
+              <input
+                type="password"
+                required
+                autoFocus
+                placeholder="PIN Gestore"
+                value={enteredPin}
+                onChange={e => setEnteredPin(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-center font-bold text-white outline-none focus:border-emerald-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
+                >
+                  Conferma
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPinModalOpen(false)}
+                  className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs"
+                >
+                  Annulla
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
