@@ -57,7 +57,7 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
-  // Lettura Room ID da link d'invito
+  // Lettura parametri link
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -84,7 +84,7 @@ export default function App() {
     }
   }, []);
 
-  // Ascolto Realtime Supabase
+  // Supabase Realtime
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -119,7 +119,6 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Salvataggio con nomi colonna corretti su Supabase
   const pushStateToSupabase = async (newTeamsData, newHistory, overrides = {}) => {
     setTeamsData(newTeamsData);
     if (newHistory) setHistory(newHistory);
@@ -138,7 +137,6 @@ export default function App() {
     await supabase.from('rooms').update(updatePayload).eq('id', roomId);
   };
 
-  // Creazione Stanza Gestore
   const handleCreateRoom = async (e) => {
     e.preventDefault();
     const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
@@ -182,7 +180,6 @@ export default function App() {
     window.history.pushState({}, '', `?room=${code}`);
   };
 
-  // Entrata Ospite: sceglie la sua squadra
   const handleEnterAsGuest = (teamIdx) => {
     setMyTeamIndex(teamIdx);
     setIsHost(false);
@@ -213,7 +210,6 @@ export default function App() {
     setIsGuestJoining(true);
   };
 
-  // Verifica PIN Gestore
   const handleVerifyHostPin = (e) => {
     e.preventDefault();
     if (enteredPin === hostPin) {
@@ -226,10 +222,10 @@ export default function App() {
     }
   };
 
-  // Toggle blocco reparto (solo Gestore)
   const handleToggleLockRole = async (roleKey) => {
     if (!isHost) return;
-    const updatedLocks = { ...lockedRoles, [roleKey]: !lockedRoles[roleKey] };
+    const currentLock = Boolean(lockedRoles && lockedRoles[roleKey]);
+    const updatedLocks = { ...lockedRoles, [roleKey]: !currentLock };
     setLockedRoles(updatedLocks);
     await pushStateToSupabase(teamsData, history, { locked_roles: updatedLocks });
   };
@@ -266,12 +262,13 @@ export default function App() {
     await pushStateToSupabase(JSON.parse(lastState), newHistory);
   };
 
-  // Modifica slot
+  // Blocco rigoroso lato client
   const handleCellChange = async (teamIdx, role, index, field, value) => {
-    // Controllo permessi
+    const isRoleLocked = Boolean(lockedRoles && lockedRoles[role]);
     if (!isHost) {
-      if (myTeamIndex !== teamIdx) return;
-      if (lockedRoles[role] === true) return;
+      if (myTeamIndex !== teamIdx || isRoleLocked) {
+        return;
+      }
     }
 
     const updatedTeam = { ...teamsData[teamIdx] };
@@ -289,9 +286,11 @@ export default function App() {
   };
 
   const handleClearSlot = async (teamIdx, role, index) => {
+    const isRoleLocked = Boolean(lockedRoles && lockedRoles[role]);
     if (!isHost) {
-      if (myTeamIndex !== teamIdx) return;
-      if (lockedRoles[role] === true) return;
+      if (myTeamIndex !== teamIdx || isRoleLocked) {
+        return;
+      }
     }
 
     const updatedTeam = { ...teamsData[teamIdx] };
@@ -308,10 +307,11 @@ export default function App() {
     e.preventDefault();
     if (!quickName.trim()) return;
 
+    const isRoleLocked = Boolean(lockedRoles && lockedRoles[quickRole]);
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
-    if (!isHost && lockedRoles[quickRole] === true) {
-      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore!`);
+    if (!isHost && isRoleLocked) {
+      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore! Impossibile assegnare nuovi calciatori.`);
       return;
     }
 
@@ -462,7 +462,6 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* Opzione 1: Gestore Crea Stanza */}
               <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
                   <ShieldCheck className="w-4 h-4" /> SEI IL GESTORE DELL'ASTA?
@@ -492,7 +491,6 @@ export default function App() {
                 </form>
               </div>
 
-              {/* Opzione 2: Partecipante Entra con Codice */}
               <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/30 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-bold text-indigo-400">
                   <Users className="w-4 h-4" /> SEI UN PARTECIPANTE (OSPITE)?
@@ -518,7 +516,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Modal Verifica PIN Gestore */}
         {isPinModalOpen && (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
@@ -558,10 +555,10 @@ export default function App() {
     );
   }
 
-  // TABELLONE LIVE
+  // TABELLONE ASTA IN DIRETTA
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* 1. Header Principale */}
+      {/* Header Principale */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -570,7 +567,6 @@ export default function App() {
               <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '👑 (GESTORE)' : `👤 (${teamNames[myTeamIndex]})`}</span>
             </div>
 
-            {/* Identità Utente Fissa per Ospiti / Selettore per Gestore */}
             {isHost ? (
               <div className="flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300">
                 <ShieldCheck className="w-3.5 h-3.5" /> Gestore con Accesso Totale
@@ -582,7 +578,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsPinModalOpen(true)}
-                  className="ml-2 text-[10px] text-emerald-400 hover:underline flex items-center gap-0.5"
+                  className="ml-2 text-[10px] text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
                 >
                   <KeyRound className="w-3 h-3" /> PIN Gestore
                 </button>
@@ -647,7 +643,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. Barra Assegnazione Rapida */}
+      {/* Barra Assegnazione Rapida */}
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
@@ -741,7 +737,7 @@ export default function App() {
         </form>
       </div>
 
-      {/* 3. Tabellone Squadre */}
+      {/* Tabellone Squadre */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
@@ -799,10 +795,10 @@ export default function App() {
                     const slots = teamsData[teamIdx][roleKey];
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
-                    const isRoleLocked = Boolean(lockedRoles && lockedRoles[roleKey]);
-
-                    // REGOLA FERREA DI MODIFICA
-                    const isEditable = isHost || (isMyTeam && !isRoleLocked);
+                    
+                    // Condizione blocco assoluta
+                    const isRoleLocked = Boolean(lockedRoles && lockedRoles[roleKey] === true);
+                    const canEdit = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
                       <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
@@ -827,7 +823,7 @@ export default function App() {
                             </button>
                           ) : (
                             isRoleLocked && (
-                              <span className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/40 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
+                              <span className="flex items-center gap-1 bg-rose-950/90 border border-rose-500/50 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
                                 <Lock className="w-2.5 h-2.5" /> Bloccato
                               </span>
                             )
@@ -840,39 +836,41 @@ export default function App() {
                           <strong className="text-amber-300">{spentRole} €</strong>
                         </div>
 
-                        {/* Righe Giocatori */}
-                        <div className="space-y-1">
+                        {/* Righe Giocatori con Schermatura Pointer-Events */}
+                        <div className={`space-y-1 ${!canEdit ? 'pointer-events-none select-none' : ''}`}>
                           {slots.map((slot, idx) => (
                             <div key={idx} className="flex items-center gap-1">
                               <input
                                 type="text"
-                                readOnly={!isEditable}
-                                disabled={!isEditable}
+                                readOnly={!canEdit}
+                                disabled={!canEdit}
+                                tabIndex={canEdit ? 0 : -1}
                                 placeholder={`${roleKey}${idx + 1}`}
                                 value={slot.name}
-                                onChange={e => isEditable && handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
+                                onChange={e => canEdit && handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
                                 className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold whitespace-nowrap overflow-x-auto ${
-                                  isEditable
+                                  canEdit
                                     ? 'bg-slate-950 border border-slate-700 text-white focus:border-emerald-400 focus:outline-none' 
-                                    : 'bg-slate-900/90 border border-slate-800/80 text-slate-500 cursor-not-allowed select-none'
+                                    : 'bg-slate-950/40 border border-slate-800/40 text-slate-500 cursor-not-allowed select-none opacity-60'
                                 }`}
                               />
                               <input
                                 type="number"
                                 min="0"
                                 max={totalBudget}
-                                readOnly={!isEditable}
-                                disabled={!isEditable}
+                                readOnly={!canEdit}
+                                disabled={!canEdit}
+                                tabIndex={canEdit ? 0 : -1}
                                 placeholder="€"
                                 value={slot.price}
-                                onChange={e => isEditable && handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
+                                onChange={e => canEdit && handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
                                 className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center ${
-                                  isEditable
+                                  canEdit
                                     ? 'bg-slate-950 border border-slate-700 text-amber-400 focus:border-emerald-400 focus:outline-none' 
-                                    : 'bg-slate-900/90 border border-slate-800/80 text-amber-600/50 cursor-not-allowed select-none'
+                                    : 'bg-slate-950/40 border border-slate-800/40 text-amber-600/40 cursor-not-allowed select-none opacity-60'
                                 }`}
                               />
-                              {isEditable && slot.name ? (
+                              {canEdit && slot.name ? (
                                 <button
                                   type="button"
                                   onClick={() => handleClearSlot(teamIdx, roleKey, idx)}
