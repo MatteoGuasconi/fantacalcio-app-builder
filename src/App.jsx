@@ -53,7 +53,7 @@ export default function App() {
   });
 
   const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db_universal');
+    const saved = localStorage.getItem('fanta_custom_players_db_final');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -84,7 +84,7 @@ export default function App() {
     localStorage.setItem('fanta_custom_teams_count_final', teamCount.toString());
     localStorage.setItem('fanta_custom_team_names_final', JSON.stringify(teamNames));
     localStorage.setItem('fanta_custom_teams_data_final', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db_universal', JSON.stringify(customPlayersDb));
+    localStorage.setItem('fanta_custom_players_db_final', JSON.stringify(customPlayersDb));
   }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
 
   useEffect(() => {
@@ -248,28 +248,10 @@ export default function App() {
     }
   };
 
-  // Caricamento asincrono garantito di PDF.js
-  const loadPdfJsScript = () => {
-    return new Promise((resolve, reject) => {
-      if (window.pdfjsLib) {
-        resolve(window.pdfjsLib);
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
-      script.onload = () => {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-        resolve(window.pdfjsLib);
-      };
-      script.onerror = () => reject(new Error('Impossibile caricare il lettore PDF'));
-      document.body.appendChild(script);
-    });
-  };
-
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('⏳ Lettura del file in corso...');
+    setUploadStatus('⏳ Elaborazione del file in corso...');
 
     const ext = file.name.split('.').pop().toLowerCase();
 
@@ -325,59 +307,25 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = async () => {
         try {
-          const pdfLib = await loadPdfJsScript();
-          const typedarray = new Uint8Array(reader.result);
-          const pdf = await pdfLib.getDocument({ data: typedarray }).promise;
-          const parsed = [];
-          let currentSection = 'P';
+          const base64 = reader.result.split(',')[1];
+          const response = await fetch('/api/parse-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64 })
+          });
 
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            
-            // Raggruppa gli elementi per coordinata Y (stessa riga)
-            const rows = {};
-            textContent.items.forEach(it => {
-              const y = Math.round(it.transform[5] / 4) * 4;
-              if (!rows[y]) rows[y] = [];
-              rows[y].push({ x: it.transform[4], text: it.str.trim() });
-            });
-
-            const sortedY = Object.keys(rows).map(Number).sort((a, b) => b - a);
-
-            sortedY.forEach(y => {
-              const items = rows[y].sort((a, b) => a.x - b.x).map(it => it.text).filter(Boolean);
-              const line = items.join(' ');
-
-              if (line.includes('Portieri')) currentSection = 'P';
-              else if (line.includes('Difensori')) currentSection = 'D';
-              else if (line.includes('Centrocampisti')) currentSection = 'C';
-              else if (line.includes('Attaccanti')) currentSection = 'A';
-
-              // Analizza token riga
-              const roleToken = items.find(it => it.match(/^([PDCA])(\(.*\))?$/i) || it.match(/^D[A-Za-z.()]+$/i) || it.match(/^C[A-Za-z.()]+$/i) || it.match(/^A[A-Za-z.()]+$/i));
-              const role = roleToken ? roleToken.charAt(0).toUpperCase() : currentSection;
-
-              // Filtra parole escludendo numeri e ruoli
-              const words = items.filter(it => !it.startsWith('#') && isNaN(it) && it !== roleToken && it.length > 1);
-
-              if (words.length >= 1) {
-                const name = words[0];
-                const team = words[1] || '';
-                if (!['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot', 'R.'].includes(name)) {
-                  parsed.push({ role, name, team });
-                }
-              }
-            });
+          const resData = await response.json();
+          if (resData.players && resData.players.length > 0) {
+            parseAndAddPlayers(resData.players);
+          } else {
+            setUploadStatus('❌ Nessun calciatore trovato nel PDF.');
           }
-
-          parseAndAddPlayers(parsed);
         } catch (err) {
           console.error(err);
           setUploadStatus('❌ Errore durante la scansione del PDF.');
         }
       };
-      reader.readAsArrayBuffer(file);
+      reader.readAsDataURL(file);
     }
   };
 
