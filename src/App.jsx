@@ -14,7 +14,7 @@ export default function App() {
   const [roomId, setRoomId] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [hostPin, setHostPin] = useState('');
-  const [myTeamIndex, setMyTeamIndex] = useState(0);
+  const [myTeamIndex, setMyTeamIndex] = useState(null);
   const [selectedTargetTeam, setSelectedTargetTeam] = useState(0);
   const [inLobby, setInLobby] = useState(true);
 
@@ -57,6 +57,7 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
+  // Lettura Room ID da link d'invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -83,22 +84,23 @@ export default function App() {
     }
   }, []);
 
+  // Ascolto Realtime Supabase
   useEffect(() => {
     if (!roomId || inLobby) return;
 
     const channel = supabase
-      .channel(`room_${roomId}`)
+      .channel(`room_sync_${roomId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, (payload) => {
         const updated = payload.new;
-        setTotalBudget(updated.budget);
-        setHasDefMod(updated.has_def_mod);
-        setHasTeamMod(updated.has_team_mod);
-        setTeamCount(updated.team_count);
-        setTeamNames(updated.team_names);
-        setTeamsData(updated.teams_data);
-        setLockedRoles(updated.locked_roles || { P: false, D: false, C: false, A: false });
-        setHostPin(updated.host_pin || '1234');
-        setHistory(updated.history || []);
+        if (updated.budget !== undefined) setTotalBudget(updated.budget);
+        if (updated.has_def_mod !== undefined) setHasDefMod(updated.has_def_mod);
+        if (updated.has_team_mod !== undefined) setHasTeamMod(updated.has_team_mod);
+        if (updated.team_count !== undefined) setTeamCount(updated.team_count);
+        if (updated.team_names !== undefined) setTeamNames(updated.team_names);
+        if (updated.teams_data !== undefined) setTeamsData(updated.teams_data);
+        if (updated.locked_roles !== undefined) setLockedRoles(updated.locked_roles);
+        if (updated.host_pin !== undefined) setHostPin(updated.host_pin);
+        if (updated.history !== undefined) setHistory(updated.history);
       })
       .subscribe();
 
@@ -117,23 +119,26 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Salvataggio con nomi colonna corretti su Supabase
   const pushStateToSupabase = async (newTeamsData, newHistory, overrides = {}) => {
     setTeamsData(newTeamsData);
     if (newHistory) setHistory(newHistory);
 
-    await supabase.from('rooms').update({
+    const updatePayload = {
       teams_data: newTeamsData,
       history: newHistory || history,
       budget: overrides.budget !== undefined ? overrides.budget : totalBudget,
-      has_def_mod: overrides.hasDefMod !== undefined ? overrides.hasDefMod : hasDefMod,
-      has_team_mod: overrides.hasTeamMod !== undefined ? overrides.hasTeamMod : hasTeamMod,
-      team_count: overrides.teamCount !== undefined ? overrides.teamCount : teamCount,
-      team_names: overrides.teamNames !== undefined ? overrides.teamNames : teamNames,
-      locked_roles: overrides.lockedRoles !== undefined ? overrides.lockedRoles : lockedRoles,
-      ...overrides
-    }).eq('id', roomId);
+      has_def_mod: overrides.has_def_mod !== undefined ? overrides.has_def_mod : hasDefMod,
+      has_team_mod: overrides.has_team_mod !== undefined ? overrides.has_team_mod : hasTeamMod,
+      team_count: overrides.team_count !== undefined ? overrides.team_count : teamCount,
+      team_names: overrides.team_names !== undefined ? overrides.team_names : teamNames,
+      locked_roles: overrides.locked_roles !== undefined ? overrides.locked_roles : lockedRoles
+    };
+
+    await supabase.from('rooms').update(updatePayload).eq('id', roomId);
   };
 
+  // Creazione Stanza Gestore
   const handleCreateRoom = async (e) => {
     e.preventDefault();
     const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
@@ -177,6 +182,7 @@ export default function App() {
     window.history.pushState({}, '', `?room=${code}`);
   };
 
+  // Entrata Ospite: sceglie la sua squadra
   const handleEnterAsGuest = (teamIdx) => {
     setMyTeamIndex(teamIdx);
     setIsHost(false);
@@ -190,7 +196,7 @@ export default function App() {
 
     const { data, error } = await supabase.from('rooms').select('*').eq('id', code).single();
     if (error || !data) {
-      alert("Stanza non trovata! Verifica il codice o il link.");
+      alert("Stanza non trovata! Verifica il codice.");
       return;
     }
 
@@ -207,6 +213,7 @@ export default function App() {
     setIsGuestJoining(true);
   };
 
+  // Verifica PIN Gestore
   const handleVerifyHostPin = (e) => {
     e.preventDefault();
     if (enteredPin === hostPin) {
@@ -215,15 +222,16 @@ export default function App() {
       setEnteredPin('');
       alert("Privilegi Gestore sbloccati!");
     } else {
-      alert("PIN errato! Accesso Gestore negato.");
+      alert("PIN errato!");
     }
   };
 
+  // Toggle blocco reparto (solo Gestore)
   const handleToggleLockRole = async (roleKey) => {
     if (!isHost) return;
     const updatedLocks = { ...lockedRoles, [roleKey]: !lockedRoles[roleKey] };
     setLockedRoles(updatedLocks);
-    await pushStateToSupabase(teamsData, history, { lockedRoles: updatedLocks });
+    await pushStateToSupabase(teamsData, history, { locked_roles: updatedLocks });
   };
 
   const handleNameSearchChange = (value) => {
@@ -258,15 +266,12 @@ export default function App() {
     await pushStateToSupabase(JSON.parse(lastState), newHistory);
   };
 
+  // Modifica slot
   const handleCellChange = async (teamIdx, role, index, field, value) => {
-    // BLOCCO RIGIDO DI SICUREZZA
+    // Controllo permessi
     if (!isHost) {
-      if (myTeamIndex !== teamIdx) {
-        return; // Impossibile modificare squadre altrui
-      }
-      if (lockedRoles[role] === true) {
-        return; // Impossibile modificare se il reparto è convalidato dal Gestore
-      }
+      if (myTeamIndex !== teamIdx) return;
+      if (lockedRoles[role] === true) return;
     }
 
     const updatedTeam = { ...teamsData[teamIdx] };
@@ -306,7 +311,7 @@ export default function App() {
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && lockedRoles[quickRole] === true) {
-      alert(`Il reparto ${quickRole} è bloccato dal Gestore! Impossibile inserire nuovi acquisti.`);
+      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore!`);
       return;
     }
 
@@ -415,13 +420,12 @@ export default function App() {
             <p className="text-xs text-slate-400">Protezione antifrode e sincronizzazione in tempo reale</p>
           </div>
 
-          {/* Accesso tramite link d'invito */}
           {isGuestJoining ? (
             <div className="space-y-4">
               <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/40 text-center space-y-2">
-                <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">Stanza Lega Rilevata</span>
+                <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">Stanza Rilevata</span>
                 <h2 className="text-2xl font-black text-white">{roomId}</h2>
-                <p className="text-xs text-slate-400">Clicca sulla tua squadra per entrare all'asta:</p>
+                <p className="text-xs text-slate-400">Seleziona la tua squadra per partecipare all'asta:</p>
               </div>
 
               <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -433,7 +437,7 @@ export default function App() {
                     className="w-full py-2.5 px-4 bg-slate-950 hover:bg-indigo-600 border border-slate-800 hover:border-indigo-400 rounded-xl text-sm font-black text-white flex justify-between items-center transition shadow cursor-pointer group"
                   >
                     <span>{teamNames[idx] || `Squadra ${idx + 1}`}</span>
-                    <span className="text-xs font-semibold text-slate-400 group-hover:text-white">Accedi ➔</span>
+                    <span className="text-xs font-semibold text-slate-400 group-hover:text-white">Entra ➔</span>
                   </button>
                 ))}
               </div>
@@ -444,7 +448,7 @@ export default function App() {
                   onClick={() => setIsPinModalOpen(true)}
                   className="text-emerald-400 hover:underline font-bold flex items-center gap-1"
                 >
-                  <KeyRound className="w-3.5 h-3.5" /> Sblocca come Gestore (PIN)
+                  <KeyRound className="w-3.5 h-3.5" /> Sblocca Gestore (PIN)
                 </button>
 
                 <button
@@ -474,7 +478,7 @@ export default function App() {
                   <input
                     type="password"
                     required
-                    placeholder="Imposta PIN Gestore (es. 1234)"
+                    placeholder="Imposta PIN Segreto Gestore (es. 1234)"
                     value={newRoomPin}
                     onChange={e => setNewRoomPin(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
@@ -554,7 +558,7 @@ export default function App() {
     );
   }
 
-  // TABELLONE ASTA IN DIRETTA
+  // TABELLONE LIVE
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* 1. Header Principale */}
@@ -566,36 +570,23 @@ export default function App() {
               <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '👑 (GESTORE)' : `👤 (${teamNames[myTeamIndex]})`}</span>
             </div>
 
-            {/* Ruolo attivo */}
-            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-              <span className="text-slate-400 font-bold">Ruolo attivo:</span>
-              <select
-                value={isHost ? 'host' : myTeamIndex}
-                onChange={(e) => {
-                  if (e.target.value === 'host') {
-                    if (!isHost) setIsPinModalOpen(true);
-                  } else {
-                    setIsHost(false);
-                    setMyTeamIndex(parseInt(e.target.value, 10));
-                  }
-                }}
-                className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
-              >
-                {isHost && <option value="host">👑 Gestore (Controllo Totale)</option>}
-                {Array.from({ length: teamCount }).map((_, idx) => (
-                  <option key={idx} value={idx}>👤 {teamNames[idx] || `Squadra ${idx + 1}`}</option>
-                ))}
-              </select>
-            </div>
-
-            {!isHost && (
-              <button
-                type="button"
-                onClick={() => setIsPinModalOpen(true)}
-                className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition cursor-pointer"
-              >
-                <KeyRound className="w-3 h-3" /> Sblocca Gestore
-              </button>
+            {/* Identità Utente Fissa per Ospiti / Selettore per Gestore */}
+            {isHost ? (
+              <div className="flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300">
+                <ShieldCheck className="w-3.5 h-3.5" /> Gestore con Accesso Totale
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
+                <span className="text-slate-400 font-bold">La tua squadra:</span>
+                <span className="font-extrabold text-amber-300">{teamNames[myTeamIndex]}</span>
+                <button
+                  type="button"
+                  onClick={() => setIsPinModalOpen(true)}
+                  className="ml-2 text-[10px] text-emerald-400 hover:underline flex items-center gap-0.5"
+                >
+                  <KeyRound className="w-3 h-3" /> PIN Gestore
+                </button>
+              </div>
             )}
 
             <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
@@ -775,7 +766,7 @@ export default function App() {
                           const updated = [...teamNames];
                           updated[teamIdx] = e.target.value;
                           setTeamNames(updated);
-                          pushStateToSupabase(teamsData, history, { teamNames: updated });
+                          pushStateToSupabase(teamsData, history, { team_names: updated });
                         }}
                         placeholder={`Squadra ${teamIdx + 1}`}
                         className="w-full bg-transparent text-center font-extrabold text-base text-emerald-300 focus:bg-slate-950 rounded px-1.5 py-0.5 outline-none border border-transparent focus:border-emerald-500 transition"
@@ -808,14 +799,14 @@ export default function App() {
                     const slots = teamsData[teamIdx][roleKey];
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
-                    const isRoleLocked = lockedRoles[roleKey] === true;
+                    const isRoleLocked = Boolean(lockedRoles && lockedRoles[roleKey]);
 
-                    // Regola ferrea: per poter editare devi essere il Gestore, oppure deve essere la tua squadra E il reparto non deve essere lockato
+                    // REGOLA FERREA DI MODIFICA
                     const isEditable = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
                       <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
-                        {/* Barra superiore reparto */}
+                        {/* Intestazione reparto */}
                         <div className="flex justify-between items-center mb-1.5 px-0.5">
                           <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${roleConf.badge}`}>
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
@@ -837,7 +828,7 @@ export default function App() {
                           ) : (
                             isRoleLocked && (
                               <span className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/40 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
-                                <Lock className="w-2.5 h-2.5" /> Reparto Bloccato
+                                <Lock className="w-2.5 h-2.5" /> Bloccato
                               </span>
                             )
                           )}
@@ -860,10 +851,10 @@ export default function App() {
                                 placeholder={`${roleKey}${idx + 1}`}
                                 value={slot.name}
                                 onChange={e => isEditable && handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
-                                className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white whitespace-nowrap overflow-x-auto ${
+                                className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold whitespace-nowrap overflow-x-auto ${
                                   isEditable
-                                    ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400 focus:outline-none' 
-                                    : 'bg-slate-900/90 border border-slate-800 text-slate-400 cursor-not-allowed select-none opacity-80'
+                                    ? 'bg-slate-950 border border-slate-700 text-white focus:border-emerald-400 focus:outline-none' 
+                                    : 'bg-slate-900/90 border border-slate-800/80 text-slate-500 cursor-not-allowed select-none'
                                 }`}
                               />
                               <input
@@ -878,7 +869,7 @@ export default function App() {
                                 className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center ${
                                   isEditable
                                     ? 'bg-slate-950 border border-slate-700 text-amber-400 focus:border-emerald-400 focus:outline-none' 
-                                    : 'bg-slate-900/90 border border-slate-800 text-amber-500/70 cursor-not-allowed select-none opacity-80'
+                                    : 'bg-slate-900/90 border border-slate-800/80 text-amber-600/50 cursor-not-allowed select-none'
                                 }`}
                               />
                               {isEditable && slot.name ? (
@@ -963,7 +954,7 @@ export default function App() {
                   onChange={(e) => {
                     const count = parseInt(e.target.value, 10);
                     setTeamCount(count);
-                    pushStateToSupabase(teamsData, history, { teamCount: count });
+                    pushStateToSupabase(teamsData, history, { team_count: count });
                   }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-white outline-none focus:border-emerald-500 cursor-pointer"
                 >
@@ -981,7 +972,7 @@ export default function App() {
                     onChange={(e) => {
                       const mod = e.target.value === "SI";
                       setHasDefMod(mod);
-                      pushStateToSupabase(teamsData, history, { hasDefMod: mod });
+                      pushStateToSupabase(teamsData, history, { has_def_mod: mod });
                     }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none cursor-pointer"
                   >
@@ -997,7 +988,7 @@ export default function App() {
                     onChange={(e) => {
                       const mod = e.target.value === "SI";
                       setHasTeamMod(mod);
-                      pushStateToSupabase(teamsData, history, { hasTeamMod: mod });
+                      pushStateToSupabase(teamsData, history, { has_team_mod: mod });
                     }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-emerald-400 outline-none cursor-pointer"
                   >
@@ -1018,12 +1009,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal Verifica PIN per Gestore */}
+      {/* Modal PIN */}
       {isPinModalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-emerald-400" /> Inserisci PIN Gestore
+              <KeyRound className="w-4 h-4 text-emerald-400" /> Sblocca Privilegi Gestore
             </h3>
             <form onSubmit={handleVerifyHostPin} className="space-y-3">
               <input
