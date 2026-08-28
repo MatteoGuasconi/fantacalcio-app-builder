@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, ShieldCheck, Share2 } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, Unlock, ShieldCheck, Share2 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import { OFFICIAL_PLAYERS_DB } from './playersData';
 
@@ -22,6 +22,7 @@ export default function App() {
   const [hasTeamMod, setHasTeamMod] = useState(true);
   const [teamCount, setTeamCount] = useState(8);
   const [teamNames, setTeamNames] = useState(Array.from({ length: 8 }, (_, i) => `Squadra ${i + 1}`));
+  const [lockedRoles, setLockedRoles] = useState({ P: false, D: false, C: false, A: false });
   const [teamsData, setTeamsData] = useState(() => {
     const initial = {};
     for (let i = 0; i < 14; i++) {
@@ -70,6 +71,7 @@ export default function App() {
         setTeamCount(data.team_count);
         setTeamNames(data.team_names);
         setTeamsData(data.teams_data);
+        setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
         setHistory(data.history || []);
       }
     };
@@ -85,6 +87,7 @@ export default function App() {
         setTeamCount(updated.team_count);
         setTeamNames(updated.team_names);
         setTeamsData(updated.teams_data);
+        setLockedRoles(updated.locked_roles || { P: false, D: false, C: false, A: false });
         setHistory(updated.history || []);
       })
       .subscribe();
@@ -116,6 +119,7 @@ export default function App() {
       has_team_mod: overrides.hasTeamMod !== undefined ? overrides.hasTeamMod : hasTeamMod,
       team_count: overrides.teamCount !== undefined ? overrides.teamCount : teamCount,
       team_names: overrides.teamNames !== undefined ? overrides.teamNames : teamNames,
+      locked_roles: overrides.lockedRoles !== undefined ? overrides.lockedRoles : lockedRoles,
       ...overrides
     }).eq('id', roomId);
   };
@@ -143,11 +147,12 @@ export default function App() {
       team_count: 8,
       team_names: initialNames,
       teams_data: initialData,
+      locked_roles: { P: false, D: false, C: false, A: false },
       history: []
     });
 
     if (error) {
-      alert("Errore nella creazione della stanza. Controlla il collegamento Supabase.");
+      alert("Errore nella creazione della stanza. Riprova.");
       return;
     }
 
@@ -177,9 +182,17 @@ export default function App() {
     setTeamCount(data.team_count);
     setTeamNames(data.team_names);
     setTeamsData(data.teams_data);
+    setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
     setHistory(data.history || []);
     setInLobby(false);
     window.history.pushState({}, '', `?room=${code}`);
+  };
+
+  const handleToggleLockRole = async (roleKey) => {
+    if (!isHost) return;
+    const updatedLocks = { ...lockedRoles, [roleKey]: !lockedRoles[roleKey] };
+    setLockedRoles(updatedLocks);
+    await pushStateToSupabase(teamsData, history, { lockedRoles: updatedLocks });
   };
 
   const handleNameSearchChange = (value) => {
@@ -215,7 +228,13 @@ export default function App() {
   };
 
   const handleCellChange = async (teamIdx, role, index, field, value) => {
-    if (!isHost && myTeamIndex !== teamIdx) return;
+    if (!isHost) {
+      if (myTeamIndex !== teamIdx) return;
+      if (lockedRoles[role]) {
+        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore!`);
+        return;
+      }
+    }
 
     const updatedTeam = { ...teamsData[teamIdx] };
     const updatedRoleList = [...updatedTeam[role]];
@@ -232,7 +251,13 @@ export default function App() {
   };
 
   const handleClearSlot = async (teamIdx, role, index) => {
-    if (!isHost && myTeamIndex !== teamIdx) return;
+    if (!isHost) {
+      if (myTeamIndex !== teamIdx) return;
+      if (lockedRoles[role]) {
+        alert(`Il reparto ${role} è stato convalidato e bloccato dal Gestore!`);
+        return;
+      }
+    }
 
     const updatedTeam = { ...teamsData[teamIdx] };
     const updatedRoleList = [...updatedTeam[role]];
@@ -249,6 +274,11 @@ export default function App() {
     if (!quickName.trim()) return;
     if (myTeamIndex === null) {
       alert("Seleziona prima la tua squadra in alto!");
+      return;
+    }
+
+    if (!isHost && lockedRoles[quickRole]) {
+      alert(`Il reparto selezionato (${quickRole}) è bloccato e convalidato dal Gestore!`);
       return;
     }
 
@@ -347,14 +377,14 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // SCHERMATA LOBBY (SCELTA GESTORE / OSPITE)
+  // SCHERMATA LOBBY
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-black text-white tracking-wide">ASTA FANTACALCIO LIVE</h1>
-            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale per tutti i partecipanti</p>
+            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale con blocco antifrode</p>
           </div>
 
           <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
@@ -404,10 +434,10 @@ export default function App() {
     );
   }
 
-  // TABELLONE ASTA IN DIRETTA
+  // TABELLONE LIVE
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
-      {/* 1. Header Principale Fissa */}
+      {/* 1. Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex-shrink-0 z-30 shadow-md">
         <div className="w-full flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -562,7 +592,7 @@ export default function App() {
         </form>
       </div>
 
-      {/* 3. Tabellone con Nomi e Totali Fissi e Scorrimento Giocatori */}
+      {/* 3. Tabellone */}
       <main className="flex-1 overflow-x-auto overflow-y-hidden p-3 w-full">
         <div className="flex gap-3 w-max min-w-full h-full">
           {Array.from({ length: teamCount }).map((_, teamIdx) => {
@@ -612,23 +642,51 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Zona Giocatori con Scorrimento Interno */}
+                {/* Zona Giocatori */}
                 <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
                   {ROLES_CONFIG.map(roleConf => {
                     const roleKey = roleConf.key;
                     const slots = teamsData[teamIdx][roleKey];
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
+                    const isRoleLocked = lockedRoles[roleKey];
+                    const canEditSlot = isHost || (isMyTeam && !isRoleLocked);
 
                     return (
-                      <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5`}>
-                        <div className="flex justify-between items-center mb-1.5 px-1">
+                      <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
+                        {/* Tasto Blocca Sopra al Reparto (per Gestore) & Badge di Stato */}
+                        <div className="flex justify-between items-center mb-1.5 px-0.5">
                           <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${roleConf.badge}`}>
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
                           </span>
-                          <span className="text-xs text-slate-300 font-bold">
-                            Spesi: <strong className="text-amber-300">{spentRole}</strong>
-                          </span>
+
+                          {/* Pulsante Gestore o Badge Blocco */}
+                          {isHost ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLockRole(roleKey)}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-black shadow transition cursor-pointer ${
+                                isRoleLocked 
+                                  ? 'bg-rose-600 hover:bg-rose-500 text-white' 
+                                  : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                              }`}
+                            >
+                              {isRoleLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                              {isRoleLocked ? 'Sblocca' : 'Blocca & Convalida'}
+                            </button>
+                          ) : (
+                            isRoleLocked && (
+                              <span className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/40 text-rose-300 text-[10px] font-black px-1.5 py-0.5 rounded">
+                                <Lock className="w-2.5 h-2.5" /> Bloccato
+                              </span>
+                            )
+                          )}
+                        </div>
+
+                        {/* Totale Speso Reparto */}
+                        <div className="flex justify-between items-center mb-1 px-1 text-xs text-slate-300 font-bold">
+                          <span>Totale Reparto:</span>
+                          <strong className="text-amber-300">{spentRole} €</strong>
                         </div>
 
                         {/* Righe Giocatori */}
@@ -637,32 +695,32 @@ export default function App() {
                             <div key={idx} className="flex items-center gap-1">
                               <input
                                 type="text"
-                                disabled={!canEditThisColumn}
+                                disabled={!canEditSlot}
                                 placeholder={`${roleKey}${idx + 1}`}
                                 value={slot.name}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'name', e.target.value)}
                                 className={`flex-1 min-w-0 rounded px-2 py-1 text-[15px] font-semibold text-white focus:outline-none whitespace-nowrap overflow-x-auto ${
-                                  canEditThisColumn ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-300 cursor-not-allowed'
+                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-slate-300 cursor-not-allowed'
                                 }`}
                               />
                               <input
                                 type="number"
                                 min="0"
                                 max={totalBudget}
-                                disabled={!canEditThisColumn}
+                                disabled={!canEditSlot}
                                 placeholder="€"
                                 value={slot.price}
                                 onChange={e => handleCellChange(teamIdx, roleKey, idx, 'price', e.target.value)}
                                 className={`w-14 flex-shrink-0 rounded px-1 py-1 text-[15px] font-black text-center text-amber-400 focus:outline-none ${
-                                  canEditThisColumn ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/80 cursor-not-allowed'
+                                  canEditSlot ? 'bg-slate-950 border border-slate-700 focus:border-emerald-400' : 'bg-slate-900/60 border border-slate-800 text-amber-500/80 cursor-not-allowed'
                                 }`}
                               />
-                              {canEditThisColumn && slot.name ? (
+                              {canEditSlot && slot.name ? (
                                 <button
                                   type="button"
                                   onClick={() => handleClearSlot(teamIdx, roleKey, idx)}
                                   title="Cancella slot"
-                                  className="p-1 flex-shrink-0 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded transition"
+                                  className="p-1 flex-shrink-0 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded transition cursor-pointer"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
@@ -673,7 +731,7 @@ export default function App() {
                           ))}
                         </div>
 
-                        {/* Percentuale Spesa Reparto */}
+                        {/* Percentuale Spesa */}
                         <div className="mt-1.5 pt-1 border-t border-slate-800 flex justify-between items-center px-1 text-xs">
                           <span className="text-slate-400 font-medium">% spesa:</span>
                           <span className="font-bold text-xs text-emerald-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
@@ -685,7 +743,7 @@ export default function App() {
                   })}
                 </div>
 
-                {/* Footer Crediti Residui Fisso in Basso */}
+                {/* Footer Crediti Residui */}
                 <div className="flex-shrink-0 p-2 border-t border-slate-800 bg-slate-950 flex flex-col gap-1.5 shadow-lg">
                   <div className="flex justify-between items-center text-xs text-slate-300 px-1">
                     <span>Spesi: <strong className="text-white text-sm">{stats.totalSpent}</strong></span>
@@ -703,7 +761,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Finestra Modale Impostazioni */}
+      {/* Modal Impostazioni */}
       {isConfigOpen && isHost && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 shadow-2xl">
@@ -785,7 +843,7 @@ export default function App() {
 
               <button
                 onClick={() => setIsConfigOpen(false)}
-                className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition shadow"
+                className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition shadow cursor-pointer"
               >
                 Salva e Chiudi
               </button>
