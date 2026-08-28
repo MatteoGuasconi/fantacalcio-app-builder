@@ -57,7 +57,7 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
-  // Lettura parametri link
+  // Lettura parametri URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -84,7 +84,7 @@ export default function App() {
     }
   }, []);
 
-  // Supabase Realtime
+  // Sottoscrizione Realtime
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -222,6 +222,7 @@ export default function App() {
     }
   };
 
+  // Blocco immediato e incondizionato del reparto
   const handleToggleLockRole = async (roleKey) => {
     if (!isHost) return;
     const currentLock = Boolean(lockedRoles && lockedRoles[roleKey]);
@@ -262,7 +263,6 @@ export default function App() {
     await pushStateToSupabase(JSON.parse(lastState), newHistory);
   };
 
-  // Blocco rigoroso lato client
   const handleCellChange = async (teamIdx, role, index, field, value) => {
     const isRoleLocked = Boolean(lockedRoles && lockedRoles[role]);
     if (!isHost) {
@@ -311,7 +311,7 @@ export default function App() {
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && isRoleLocked) {
-      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore! Impossibile assegnare nuovi calciatori.`);
+      alert(`Il reparto ${quickRole} è convalidato e bloccato dal Gestore!`);
       return;
     }
 
@@ -410,7 +410,7 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // SCHERMATA LOBBY INIZIALE
+  // Lobby Iniziale
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
@@ -555,7 +555,7 @@ export default function App() {
     );
   }
 
-  // TABELLONE ASTA IN DIRETTA
+  // Tabellone Live
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* Header Principale */}
@@ -796,7 +796,7 @@ export default function App() {
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
                     
-                    // Condizione blocco assoluta
+                    // Condizione blocco: il Gestore può bloccare sempre
                     const isRoleLocked = Boolean(lockedRoles && lockedRoles[roleKey] === true);
                     const canEdit = isHost || (isMyTeam && !isRoleLocked);
 
