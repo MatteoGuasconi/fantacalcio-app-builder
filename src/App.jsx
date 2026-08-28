@@ -10,12 +10,6 @@ const ROLES_CONFIG = [
   { key: 'A', name: 'Attaccanti', count: 6, bg: 'bg-rose-950/20', border: 'border-rose-500/30', badge: 'bg-rose-500 text-white' }
 ];
 
-const SERIE_A_TEAMS = [
-  'Atalanta', 'Bologna', 'Cagliari', 'Como', 'Fiorentina', 'Frosinone',
-  'Genoa', 'Inter', 'Juventus', 'Lazio', 'Lecce', 'Milan', 'Monza',
-  'Napoli', 'Parma', 'Roma', 'Sassuolo', 'Torino', 'Udinese', 'Venezia'
-];
-
 export default function App() {
   const [totalBudget, setTotalBudget] = useState(() => {
     return parseInt(localStorage.getItem('fanta_custom_budget_final') || '500', 10);
@@ -59,7 +53,7 @@ export default function App() {
   });
 
   const [customPlayersDb, setCustomPlayersDb] = useState(() => {
-    const saved = localStorage.getItem('fanta_custom_players_db_complete');
+    const saved = localStorage.getItem('fanta_custom_players_db_universal');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -90,7 +84,7 @@ export default function App() {
     localStorage.setItem('fanta_custom_teams_count_final', teamCount.toString());
     localStorage.setItem('fanta_custom_team_names_final', JSON.stringify(teamNames));
     localStorage.setItem('fanta_custom_teams_data_final', JSON.stringify(teamsData));
-    localStorage.setItem('fanta_custom_players_db_complete', JSON.stringify(customPlayersDb));
+    localStorage.setItem('fanta_custom_players_db_universal', JSON.stringify(customPlayersDb));
   }, [totalBudget, hasDefMod, hasTeamMod, teamCount, teamNames, teamsData, customPlayersDb]);
 
   useEffect(() => {
@@ -248,83 +242,34 @@ export default function App() {
 
     if (cleanList.length > 0) {
       setCustomPlayersDb(cleanList);
-      setUploadStatus(`✅ Listone completo caricato con successo (${cleanList.length} calciatori estratti su 503)!`);
+      setUploadStatus(`✅ Listone caricato con successo (${cleanList.length} calciatori registrati)!`);
     } else {
-      setUploadStatus('❌ Nessun dato valido estratto dal file.');
+      setUploadStatus('❌ Nessun dato valido estratto. Controlla il formato del file.');
     }
   };
 
-  // Parser PDF totale multi-pass per estrarre tutti i 503 giocatori
-  const parsePdfAllPages = (arrayBuffer) => {
-    const bytes = new Uint8Array(arrayBuffer);
-    let rawStr = '';
-    const chunk = 16384;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      rawStr += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
-    }
-
-    const playersFound = [];
-    let currentSectionRole = 'P';
-
-    // Rileva sezioni globali
-    const cleanedText = rawStr.replace(/[^\x20-\x7E\r\n\t]/g, ' ');
-    const tokens = cleanedText.split(/\s+/).filter(t => t.length > 0);
-
-    for (let i = 0; i < tokens.length; i++) {
-      const tok = tokens[i];
-      if (tok.includes('Portieri')) currentSectionRole = 'P';
-      else if (tok.includes('Difensori')) currentSectionRole = 'D';
-      else if (tok.includes('Centrocampisti')) currentSectionRole = 'C';
-      else if (tok.includes('Attaccanti')) currentSectionRole = 'A';
-
-      // Cerca la squadra di Serie A
-      const matchedTeam = SERIE_A_TEAMS.find(t => t.toLowerCase() === tok.toLowerCase());
-
-      if (matchedTeam) {
-        // Cerca all'indietro il ruolo e il nome
-        let name = '';
-        let role = currentSectionRole;
-
-        for (let back = 1; back <= 4; back++) {
-          const prevTok = tokens[i - back];
-          if (!prevTok) break;
-
-          // Controlla se è un descrittore di ruolo es. P(Por), D(Dc), DDs.E(), C(WA), A(Pc)
-          const isRoleDesc = prevTok.match(/^[PDCA](\(.*\))?$/i) || prevTok.match(/^D[A-Za-z.()]+$/i) || prevTok.match(/^C[A-Za-z.()]+$/i) || prevTok.match(/^A[A-Za-z.()]+$/i);
-          if (isRoleDesc) {
-            role = prevTok.charAt(0).toUpperCase();
-            if (['P', 'D', 'C', 'A'].includes(role)) {
-              // Il nome è il token tra il ruolo e la squadra
-              const nameTokens = tokens.slice(i - back + 1, i).filter(t => !t.startsWith('#') && isNaN(t));
-              if (nameTokens.length > 0) {
-                name = nameTokens.join(' ');
-              }
-              break;
-            }
-          }
-        }
-
-        // Se non ha trovato il ruolo prima, prova a prendere il token precedente come nome
-        if (!name && i >= 1) {
-          const candidateName = tokens[i - 1];
-          if (candidateName && isNaN(candidateName) && !candidateName.startsWith('#') && !SERIE_A_TEAMS.includes(candidateName)) {
-            name = candidateName;
-          }
-        }
-
-        if (name && name.length >= 2 && !['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot'].includes(name)) {
-          playersFound.push({ name, role, team: matchedTeam });
-        }
+  // Caricamento asincrono garantito di PDF.js
+  const loadPdfJsScript = () => {
+    return new Promise((resolve, reject) => {
+      if (window.pdfjsLib) {
+        resolve(window.pdfjsLib);
+        return;
       }
-    }
-
-    return playersFound;
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      };
+      script.onerror = () => reject(new Error('Impossibile caricare il lettore PDF'));
+      document.body.appendChild(script);
+    });
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('⏳ Scansione completa di tutte le pagine in corso...');
+    setUploadStatus('⏳ Lettura del file in corso...');
 
     const ext = file.name.split('.').pop().toLowerCase();
 
@@ -380,9 +325,55 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = async () => {
         try {
-          const parsed = parsePdfAllPages(reader.result);
+          const pdfLib = await loadPdfJsScript();
+          const typedarray = new Uint8Array(reader.result);
+          const pdf = await pdfLib.getDocument({ data: typedarray }).promise;
+          const parsed = [];
+          let currentSection = 'P';
+
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            
+            // Raggruppa gli elementi per coordinata Y (stessa riga)
+            const rows = {};
+            textContent.items.forEach(it => {
+              const y = Math.round(it.transform[5] / 4) * 4;
+              if (!rows[y]) rows[y] = [];
+              rows[y].push({ x: it.transform[4], text: it.str.trim() });
+            });
+
+            const sortedY = Object.keys(rows).map(Number).sort((a, b) => b - a);
+
+            sortedY.forEach(y => {
+              const items = rows[y].sort((a, b) => a.x - b.x).map(it => it.text).filter(Boolean);
+              const line = items.join(' ');
+
+              if (line.includes('Portieri')) currentSection = 'P';
+              else if (line.includes('Difensori')) currentSection = 'D';
+              else if (line.includes('Centrocampisti')) currentSection = 'C';
+              else if (line.includes('Attaccanti')) currentSection = 'A';
+
+              // Analizza token riga
+              const roleToken = items.find(it => it.match(/^([PDCA])(\(.*\))?$/i) || it.match(/^D[A-Za-z.()]+$/i) || it.match(/^C[A-Za-z.()]+$/i) || it.match(/^A[A-Za-z.()]+$/i));
+              const role = roleToken ? roleToken.charAt(0).toUpperCase() : currentSection;
+
+              // Filtra parole escludendo numeri e ruoli
+              const words = items.filter(it => !it.startsWith('#') && isNaN(it) && it !== roleToken && it.length > 1);
+
+              if (words.length >= 1) {
+                const name = words[0];
+                const team = words[1] || '';
+                if (!['Portieri', 'Difensori', 'Centrocampisti', 'Attaccanti', 'Nome', 'Squadra', 'FVM', 'Quot', 'R.'].includes(name)) {
+                  parsed.push({ role, name, team });
+                }
+              }
+            });
+          }
+
           parseAndAddPlayers(parsed);
         } catch (err) {
+          console.error(err);
           setUploadStatus('❌ Errore durante la scansione del PDF.');
         }
       };
@@ -475,7 +466,7 @@ export default function App() {
             <input
               type="text"
               required
-              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore dal listone..." : "Carica il listone o scrivi il nome..."}
+              placeholder={customPlayersDb.length > 0 ? "Digita nome giocatore dal listone..." : "Carica prima il listone o scrivi il nome..."}
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
