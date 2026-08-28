@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, Unlock, ShieldCheck, Share2 } from 'lucide-react';
+import { PlusCircle, RotateCcw, X, Settings, Users, Copy, Check, Lock, Unlock, ShieldCheck, Share2, LogOut } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import { OFFICIAL_PLAYERS_DB } from './playersData';
 
@@ -49,39 +49,40 @@ export default function App() {
 
   const [joinRoomInput, setJoinRoomInput] = useState('');
   const [newRoomName, setNewRoomName] = useState('');
+  const [isGuestJoining, setIsGuestJoining] = useState(false);
 
   const suggestionRef = useRef(null);
 
+  // Rileva se si entra tramite link di invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
     if (rId) {
-      setJoinRoomInput(rId.toUpperCase());
+      const code = rId.toUpperCase();
+      setJoinRoomInput(code);
+      setRoomId(code);
+      setIsGuestJoining(true);
+      // Carica i dati della stanza per mostrare l'elenco squadre
+      const loadInitialRoom = async () => {
+        const { data } = await supabase.from('rooms').select('*').eq('id', code).single();
+        if (data) {
+          setTotalBudget(data.budget);
+          setHasDefMod(data.has_def_mod);
+          setHasTeamMod(data.has_team_mod);
+          setTeamCount(data.team_count);
+          setTeamNames(data.team_names);
+          setTeamsData(data.teams_data);
+          setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
+          setHistory(data.history || []);
+        }
+      };
+      loadInitialRoom();
     }
   }, []);
 
+  // Realtime Supabase
   useEffect(() => {
-    if (!roomId) return;
-
-    const savedHost = localStorage.getItem(`fanta_host_${roomId}`) === 'true';
-    if (savedHost) {
-      setIsHost(true);
-    }
-
-    const fetchRoom = async () => {
-      const { data } = await supabase.from('rooms').select('*').eq('id', roomId).single();
-      if (data) {
-        setTotalBudget(data.budget);
-        setHasDefMod(data.has_def_mod);
-        setHasTeamMod(data.has_team_mod);
-        setTeamCount(data.team_count);
-        setTeamNames(data.team_names);
-        setTeamsData(data.teams_data);
-        setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
-        setHistory(data.history || []);
-      }
-    };
-    fetchRoom();
+    if (!roomId || inLobby) return;
 
     const channel = supabase
       .channel(`room_${roomId}`)
@@ -101,7 +102,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [roomId, inLobby]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -130,6 +131,7 @@ export default function App() {
     }).eq('id', roomId);
   };
 
+  // Creazione Stanza (Gestore)
   const handleCreateRoom = async (e) => {
     e.preventDefault();
     const code = (newRoomName.trim() || 'LEGA-' + Math.random().toString(36).substring(2, 7)).toUpperCase();
@@ -162,7 +164,6 @@ export default function App() {
       return;
     }
 
-    localStorage.setItem(`fanta_host_${code}`, 'true');
     setRoomId(code);
     setIsHost(true);
     setMyTeamIndex(0);
@@ -171,7 +172,15 @@ export default function App() {
     window.history.pushState({}, '', `?room=${code}`);
   };
 
-  const handleJoinRoom = async (e) => {
+  // Entrata come Ospite selezionando la propria squadra
+  const handleEnterAsGuest = (teamIdx) => {
+    setMyTeamIndex(teamIdx);
+    setIsHost(false);
+    setInLobby(false);
+  };
+
+  // Entrata manuale da codice
+  const handleCheckRoomCode = async (e) => {
     e.preventDefault();
     const code = joinRoomInput.trim().toUpperCase();
     if (!code) return;
@@ -183,8 +192,6 @@ export default function App() {
     }
 
     setRoomId(code);
-    const hostCheck = localStorage.getItem(`fanta_host_${code}`) === 'true';
-    setIsHost(hostCheck);
     setTotalBudget(data.budget);
     setHasDefMod(data.has_def_mod);
     setHasTeamMod(data.has_team_mod);
@@ -193,8 +200,7 @@ export default function App() {
     setTeamsData(data.teams_data);
     setLockedRoles(data.locked_roles || { P: false, D: false, C: false, A: false });
     setHistory(data.history || []);
-    setInLobby(false);
-    window.history.pushState({}, '', `?room=${code}`);
+    setIsGuestJoining(true);
   };
 
   const handleToggleLockRole = async (roleKey) => {
@@ -384,58 +390,109 @@ export default function App() {
     setTimeout(() => setCopiedReport(false), 3000);
   };
 
-  // LOBBY INIZIALE
+  // SCHERMATA DI SELEZIONE SQUADRA / LOBBY
   if (inLobby) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-black text-white tracking-wide">ASTA FANTACALCIO LIVE</h1>
-            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale con controllo Gestore completo</p>
+            <p className="text-xs text-slate-400">Sincronizzazione in tempo reale per tutti i partecipanti</p>
           </div>
 
-          <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
-              <ShieldCheck className="w-4 h-4" /> SEI IL GESTORE DELL'ASTA?
-            </div>
-            <form onSubmit={handleCreateRoom} className="space-y-2">
-              <input
-                type="text"
-                placeholder="Nome/Codice Stanza (es. MIKAELONA)"
-                value={newRoomName}
-                onChange={e => setNewRoomName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 uppercase"
-              />
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
-              >
-                Crea Nuova Stanza Lega
-              </button>
-            </form>
-          </div>
+          {/* Se si entra tramite link d'invito o dopo aver inserito il codice */}
+          {isGuestJoining ? (
+            <div className="space-y-4">
+              <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/40 text-center space-y-2">
+                <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">Stanza Rilevata</span>
+                <h2 className="text-2xl font-black text-white">{roomId}</h2>
+                <p className="text-xs text-slate-400">Seleziona quale squadra gestirai durante l'asta:</p>
+              </div>
 
-          <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/30 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-indigo-400">
-              <Users className="w-4 h-4" /> SEI UN PARTECIPANTE (OSPITE)?
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                {Array.from({ length: teamCount }).map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleEnterAsGuest(idx)}
+                    className="w-full py-2.5 px-4 bg-slate-950 hover:bg-indigo-600 border border-slate-800 hover:border-indigo-400 rounded-xl text-sm font-black text-white flex justify-between items-center transition shadow cursor-pointer group"
+                  >
+                    <span>{teamNames[idx] || `Squadra ${idx + 1}`}</span>
+                    <span className="text-xs font-semibold text-slate-400 group-hover:text-white">Seleziona ➔</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsHost(true);
+                    setSelectedTargetTeam(0);
+                    setInLobby(false);
+                  }}
+                  className="text-emerald-400 hover:underline font-bold"
+                >
+                  Entra come Gestore Generale
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsGuestJoining(false)}
+                  className="text-slate-400 hover:underline"
+                >
+                  Indietro
+                </button>
+              </div>
             </div>
-            <form onSubmit={handleJoinRoom} className="space-y-2">
-              <input
-                type="text"
-                required
-                placeholder="Incolla Codice Stanza (es. MIKAELONA)"
-                value={joinRoomInput}
-                onChange={e => setJoinRoomInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 uppercase"
-              />
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
-              >
-                Entra nell'Asta
-              </button>
-            </form>
-          </div>
+          ) : (
+            <>
+              {/* Opzione 1: Gestore Crea Stanza */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
+                  <ShieldCheck className="w-4 h-4" /> SEI IL GESTORE DELL'ASTA?
+                </div>
+                <form onSubmit={handleCreateRoom} className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Nome/Codice Stanza (es. MIKAELONA)"
+                    value={newRoomName}
+                    onChange={e => setNewRoomName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 uppercase"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
+                  >
+                    Crea Nuova Stanza Lega
+                  </button>
+                </form>
+              </div>
+
+              {/* Opzione 2: Partecipante Entra con Codice */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/30 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-bold text-indigo-400">
+                  <Users className="w-4 h-4" /> SEI UN PARTECIPANTE (OSPITE)?
+                </div>
+                <form onSubmit={handleCheckRoomCode} className="space-y-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Incolla Codice Stanza (es. MIKAELONA)"
+                    value={joinRoomInput}
+                    onChange={e => setJoinRoomInput(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 uppercase"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-sm transition shadow cursor-pointer"
+                  >
+                    Trova Stanza & Scegli Squadra
+                  </button>
+                </form>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -450,24 +507,30 @@ export default function App() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-lg">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost && '(GESTORE)'}</span>
+              <span className="text-xs font-black text-emerald-300">LIVE: {roomId} {isHost ? '(GESTORE)' : `(${teamNames[myTeamIndex]})`}</span>
             </div>
 
-            {/* Selettore della propria squadra per Ospite */}
-            {!isHost && (
-              <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-                <span className="text-slate-400 font-bold">La tua squadra:</span>
-                <select
-                  value={myTeamIndex}
-                  onChange={(e) => setMyTeamIndex(parseInt(e.target.value, 10))}
-                  className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
-                >
-                  {Array.from({ length: teamCount }).map((_, idx) => (
-                    <option key={idx} value={idx}>{teamNames[idx] || `Squadra ${idx + 1}`}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            {/* Menu Cambio Squadra / Ruolo */}
+            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
+              <span className="text-slate-400 font-bold">Ruolo attivo:</span>
+              <select
+                value={isHost ? 'host' : myTeamIndex}
+                onChange={(e) => {
+                  if (e.target.value === 'host') {
+                    setIsHost(true);
+                  } else {
+                    setIsHost(false);
+                    setMyTeamIndex(parseInt(e.target.value, 10));
+                  }
+                }}
+                className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 font-black text-amber-300 outline-none cursor-pointer"
+              >
+                <option value="host">👑 Gestore (Tutte le squadre)</option>
+                {Array.from({ length: teamCount }).map((_, idx) => (
+                  <option key={idx} value={idx}>👤 {teamNames[idx] || `Squadra ${idx + 1}`}</option>
+                ))}
+              </select>
+            </div>
 
             <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
               <span>Budget: <strong className="text-emerald-400">{totalBudget}</strong></span>
@@ -515,18 +578,26 @@ export default function App() {
                 </button>
               </>
             )}
+
+            <button
+              onClick={() => setInLobby(true)}
+              title="Torna alla Lobby"
+              className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded border border-slate-700 transition"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </header>
 
-      {/* 2. Barra Assegnazione Rapida con Dropdown Squadra Sempre Attivo */}
+      {/* 2. Barra Assegnazione Rapida */}
       <div className="bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex-shrink-0 z-20 shadow">
         <form onSubmit={handleQuickAssign} className="w-full flex flex-wrap items-center gap-3 relative">
           <span className="text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
             <PlusCircle className="w-4 h-4" /> Assegna a:
           </span>
 
-          {/* Menu a tendina per scegliere la squadra di destinazione */}
+          {/* Menu o badge di assegnazione */}
           {isHost ? (
             <select
               value={selectedTargetTeam}
@@ -678,7 +749,7 @@ export default function App() {
 
                     return (
                       <div key={roleKey} className={`rounded border ${roleConf.border} ${roleConf.bg} p-1.5 transition-all`}>
-                        {/* Tasto Blocca Sopra al Reparto (per Gestore) & Badge di Stato */}
+                        {/* Tasto Blocca Sopra al Reparto & Badge di Stato */}
                         <div className="flex justify-between items-center mb-1.5 px-0.5">
                           <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${roleConf.badge}`}>
                             {roleConf.name} ({slots.filter(s => s.name.trim()).length}/{roleConf.count})
