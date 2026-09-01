@@ -57,7 +57,7 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
-  // Lettura parametri URL
+  // Lettura Room ID da link d'invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -84,7 +84,7 @@ export default function App() {
     }
   }, []);
 
-  // Sottoscrizione Realtime
+  // Ascolto Realtime Supabase
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -222,7 +222,6 @@ export default function App() {
     }
   };
 
-  // Blocco immediato e incondizionato del reparto
   const handleToggleLockRole = async (roleKey) => {
     if (!isHost) return;
     const currentLock = Boolean(lockedRoles && lockedRoles[roleKey]);
@@ -231,14 +230,15 @@ export default function App() {
     await pushStateToSupabase(teamsData, history, { locked_roles: updatedLocks });
   };
 
+  // Ricerca completa: visualizza TUTTI i calciatori che matchano
   const handleNameSearchChange = (value) => {
     setQuickName(value);
     if (value.trim().length >= 1) {
-      const q = value.toLowerCase();
+      const q = value.toLowerCase().trim();
       const filtered = OFFICIAL_PLAYERS_DB.filter(p =>
         p.name.toLowerCase().includes(q) ||
         (p.team && p.team.toLowerCase().includes(q))
-      ).slice(0, 10);
+      );
       setSuggestions(filtered);
       setShowSuggestions(true);
     } else {
@@ -311,7 +311,7 @@ export default function App() {
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && isRoleLocked) {
-      alert(`Il reparto ${quickRole} è convalidato e bloccato dal Gestore!`);
+      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore! Impossibile assegnare nuovi calciatori.`);
       return;
     }
 
@@ -446,7 +446,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsPinModalOpen(true)}
-                  className="text-emerald-400 hover:underline font-bold flex items-center gap-1"
+                  className="text-emerald-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <KeyRound className="w-3.5 h-3.5" /> Sblocca Gestore (PIN)
                 </button>
@@ -454,7 +454,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsGuestJoining(false)}
-                  className="text-slate-400 hover:underline"
+                  className="text-slate-400 hover:underline cursor-pointer"
                 >
                   Indietro
                 </button>
@@ -670,15 +670,20 @@ export default function App() {
             <input
               type="text"
               required
-              placeholder="Digita nome giocatore (es. Lautaro, Dimarco)..."
+              placeholder="Digita nome o squadra (es. Lautaro, Como, Inter)..."
               value={quickName}
               onChange={e => handleNameSearchChange(e.target.value)}
               onFocus={() => quickName.length >= 1 && setShowSuggestions(true)}
               className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-3 py-1.5 text-base text-white placeholder-slate-500 outline-none"
             />
 
+            {/* Suggerimenti Completi senza limiti con scrollbar */}
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 max-h-64 overflow-y-auto">
+              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 max-h-80 overflow-y-auto">
+                <div className="px-3 py-1.5 bg-slate-950 border-b border-slate-800 text-[11px] font-bold text-slate-400 flex justify-between">
+                  <span>Risultati trovati: {suggestions.length}</span>
+                  <span>Scorri la lista per vederli tutti ⬇️</span>
+                </div>
                 {suggestions.map((p, idx) => (
                   <div
                     key={idx}
@@ -796,7 +801,6 @@ export default function App() {
                     const spentRole = stats.roleTotals[roleKey];
                     const percentRole = ((spentRole / totalBudget) * 100).toFixed(1);
                     
-                    // Condizione blocco: il Gestore può bloccare sempre
                     const isRoleLocked = Boolean(lockedRoles && lockedRoles[roleKey] === true);
                     const canEdit = isHost || (isMyTeam && !isRoleLocked);
 
@@ -836,7 +840,7 @@ export default function App() {
                           <strong className="text-amber-300">{spentRole} €</strong>
                         </div>
 
-                        {/* Righe Giocatori con Schermatura Pointer-Events */}
+                        {/* Righe Giocatori con Blocco Integrato */}
                         <div className={`space-y-1 ${!canEdit ? 'pointer-events-none select-none' : ''}`}>
                           {slots.map((slot, idx) => (
                             <div key={idx} className="flex items-center gap-1">
@@ -1012,7 +1016,7 @@ export default function App() {
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-xs w-full p-5 shadow-2xl space-y-4">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-emerald-400" /> Sblocca Privilegi Gestore
+              <KeyRound className="w-4 h-4 text-emerald-400" /> Inserisci PIN Gestore
             </h3>
             <form onSubmit={handleVerifyHostPin} className="space-y-3">
               <input
