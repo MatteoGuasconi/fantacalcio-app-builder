@@ -10,6 +10,15 @@ const ROLES_CONFIG = [
   { key: 'A', name: 'Attaccanti', count: 6, bg: 'bg-rose-950/20', border: 'border-rose-500/30', badge: 'bg-rose-500 text-white' }
 ];
 
+// Funzione per pulire accenti, apostrofi e caratteri speciali
+const cleanText = (str) => {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+};
+
 export default function App() {
   const [roomId, setRoomId] = useState('');
   const [isHost, setIsHost] = useState(false);
@@ -57,7 +66,6 @@ export default function App() {
 
   const suggestionRef = useRef(null);
 
-  // Lettura Room ID da link d'invito
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rId = params.get('room');
@@ -84,7 +92,6 @@ export default function App() {
     }
   }, []);
 
-  // Ascolto Realtime Supabase
   useEffect(() => {
     if (!roomId || inLobby) return;
 
@@ -230,15 +237,17 @@ export default function App() {
     await pushStateToSupabase(teamsData, history, { locked_roles: updatedLocks });
   };
 
-  // Ricerca completa: visualizza TUTTI i calciatori che matchano
+  // Ricerca senza barriere per accenti, simboli e spazi
   const handleNameSearchChange = (value) => {
     setQuickName(value);
-    if (value.trim().length >= 1) {
-      const q = value.toLowerCase().trim();
-      const filtered = OFFICIAL_PLAYERS_DB.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.team && p.team.toLowerCase().includes(q))
-      );
+    const cleanedQuery = cleanText(value);
+
+    if (cleanedQuery.length >= 1) {
+      const filtered = OFFICIAL_PLAYERS_DB.filter(p => {
+        const nameClean = cleanText(p.name);
+        const teamClean = cleanText(p.team);
+        return nameClean.includes(cleanedQuery) || teamClean.includes(cleanedQuery);
+      });
       setSuggestions(filtered);
       setShowSuggestions(true);
     } else {
@@ -311,7 +320,7 @@ export default function App() {
     const destinationTeamIdx = isHost ? selectedTargetTeam : myTeamIndex;
 
     if (!isHost && isRoleLocked) {
-      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore! Impossibile assegnare nuovi calciatori.`);
+      alert(`Il reparto ${quickRole} è bloccato e convalidato dal Gestore! Impossibile inserire nuovi acquisti.`);
       return;
     }
 
@@ -591,6 +600,8 @@ export default function App() {
               <span>Mod. Difesa: {hasDefMod ? '✅' : '❌'}</span>
               <span>•</span>
               <span>Mod. Squadra: {hasTeamMod ? '✅' : '❌'}</span>
+              <span>•</span>
+              <span>Listone: <strong className="text-indigo-400">{OFFICIAL_PLAYERS_DB.length} giocatori</strong></span>
             </div>
           </div>
 
