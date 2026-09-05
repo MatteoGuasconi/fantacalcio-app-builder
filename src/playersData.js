@@ -114,7 +114,7 @@ export const OFFICIAL_PLAYERS_DB = [
   { role: "D", name: "De Silvestri", team: "Bologna" },
   { role: "D", name: "De Winter", team: "Milan" },
   { role: "D", name: "Delprato", team: "Parma" },
-  { role: "D", name: "Dembelé A.", team: "Lecce" },
+  { role: "D", name: "Dembele A.", team: "Lecce" },
   { role: "D", name: "Di Lorenzo", team: "Napoli" },
   { role: "D", name: "Diawara S.", team: "Milan" },
   { role: "D", name: "Diego Carlos", team: "Parma" },
@@ -189,7 +189,7 @@ export const OFFICIAL_PLAYERS_DB = [
   { role: "D", name: "Moreno M.", team: "Venezia" },
   { role: "D", name: "N'Dicka", team: "Roma" },
   { role: "D", name: "Ndaba", team: "Lecce" },
-  { role: "D", name: "Ndiaye", team: "Parma" },
+  { role: "D", name: "Ndiaye", team: "Frosinone" },
   { role: "D", name: "Obert", team: "Cagliari" },
   { role: "D", name: "Obrador", team: "Sassuolo" },
   { role: "D", name: "Odenthal", team: "Sassuolo" },
@@ -256,7 +256,7 @@ export const OFFICIAL_PLAYERS_DB = [
   { role: "D", name: "Ziolkowski", team: "Monza" },
   { role: "D", name: "Zortea", team: "Bologna" },
 
-  // CENTROCAMPISTI (192)
+  // CENTROCAMPISTI (193)
   { role: "C", name: "Aboukhlal", team: "Torino" },
   { role: "C", name: "Addai", team: "Como" },
   { role: "C", name: "Adopo", team: "Cagliari" },
@@ -317,6 +317,7 @@ export const OFFICIAL_PLAYERS_DB = [
   { role: "C", name: "Ekkelenkamp", team: "Udinese" },
   { role: "C", name: "El Azzouzi A.", team: "Frosinone" },
   { role: "C", name: "El Azzouzi O.", team: "Bologna" },
+  { role: "C", name: "El Shaarawy", team: "Genoa" },
   { role: "C", name: "Ellertsson", team: "Genoa" },
   { role: "C", name: "Elmas", team: "Atalanta" },
   { role: "C", name: "Fabbian", team: "Parma" },
